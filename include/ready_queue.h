@@ -1,10 +1,10 @@
-#ifndef READY_QUEUE_H
-#define READY_QUEUE_H
-
 // Filename: ready_queue.h
 // Programmer(s): Abdurrahman Alyajouri
 // Date: 5/8/2025
 // Purpose: To serve as a queue to hold ready players to form sessions fairly.
+
+#ifndef READY_QUEUE_H
+#define READY_QUEUE_H
 
 #include <stddef.h>
 
