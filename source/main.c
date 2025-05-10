@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "../include/player_queue.h"
+#include "player_queue.h"
 
 void print(player_queue_t* queue) {
     player_queue_node_t* cur = queue->front;

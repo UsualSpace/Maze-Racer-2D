@@ -1,0 +1,14 @@
+[
+{
+  "directory": "D:/School Projects/Maze Racer 2D/Maze-Racer-2D/build",
+  "command": "C:\\msys64\\ucrt64\\bin\\gcc.exe -I\"D:/School Projects/Maze Racer 2D/Maze-Racer-2D/include\" -g -o CMakeFiles\\MazeRacer2D.dir\\source\\main.c.obj -c \"D:\\School Projects\\Maze Racer 2D\\Maze-Racer-2D\\source\\main.c\"",
+  "file": "D:\\School Projects\\Maze Racer 2D\\Maze-Racer-2D\\source\\main.c",
+  "output": "CMakeFiles\\MazeRacer2D.dir\\source\\main.c.obj"
+},
+{
+  "directory": "D:/School Projects/Maze Racer 2D/Maze-Racer-2D/build",
+  "command": "C:\\msys64\\ucrt64\\bin\\gcc.exe -I\"D:/School Projects/Maze Racer 2D/Maze-Racer-2D/include\" -g -o CMakeFiles\\MazeRacer2D.dir\\source\\player_queue.c.obj -c \"D:\\School Projects\\Maze Racer 2D\\Maze-Racer-2D\\source\\player_queue.c\"",
+  "file": "D:\\School Projects\\Maze Racer 2D\\Maze-Racer-2D\\source\\player_queue.c",
+  "output": "CMakeFiles\\MazeRacer2D.dir\\source\\player_queue.c.obj"
+}
+]

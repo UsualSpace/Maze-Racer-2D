@@ -36,11 +36,11 @@ typedef struct player_queue {
 } player_queue_t;
 
 // initializer/cleanup.
-int player_queue_init(player_queue_t** queue);
+player_queue_t* player_queue_init(void);
 int player_queue_free(player_queue_t* queue);
 
 // main api
-int player_queue_front(player_queue_t* queue, player_queue_type_t* data);
+player_queue_type_t* player_queue_front(player_queue_t* queue);
 int player_queue_push(player_queue_t* queue, player_queue_type_t data);
 int player_queue_pop(player_queue_t* queue);
 int player_queue_clear(player_queue_t* queue);
