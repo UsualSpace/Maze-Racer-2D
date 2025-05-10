@@ -1,3 +1,0 @@
-D:/School Projects/Maze Racer 2D/Maze-Racer-2D/build/CMakeFiles/MazeRacer2D.dir
-D:/School Projects/Maze Racer 2D/Maze-Racer-2D/build/CMakeFiles/edit_cache.dir
-D:/School Projects/Maze Racer 2D/Maze-Racer-2D/build/CMakeFiles/rebuild_cache.dir
