@@ -31,5 +31,9 @@
 *.out
 *.app
 
-# Build Directory
-*/build/
+# Directories
+build/
+.vscode/
+
+# Specific files
+CMakePresets.json

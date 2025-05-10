@@ -42,9 +42,38 @@ maze_t* generate_maze(maze_size_t rows, maze_size_t columns) {
     
     int current_row = 0;
     int current_column = 0;
-    temp_cell_t* current_cell = maze_cell_stack_top(cell_stack);
-    while(current_cell->visited == FALSE) {
+    temp_cell_t* current_cell = NULL;
+    while((current_cell = maze_cell_stack_top(cell_stack))->visited == FALSE) {
+        //mark cell as visited.
+        current_cell->visited = TRUE;
 
+        uint8_t direction;
+        int new_row = 0;
+        int new_column = 0;
+        switch(rand() % 4) {
+            case 0:
+                direction = NORTH;
+                new_row -= 1;
+                break;
+            case 1: 
+                direction = SOUTH;
+                new_row += 1;
+                break;
+            case 2:
+                direction = EAST;
+                new_column += 1;
+                break;
+            case 3: 
+                direction = WEST;
+                new_column -= 1;
+                break;
+            default:
+                break;
+        }
+
+        if((new_row >= 0 && new_row < rows) && (new_column >= 0 && new_column < columns)) {
+            
+        }
     }
 
     return maze;
