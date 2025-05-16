@@ -13,4 +13,4 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 
 file(GLOB SRC "./source/*.c")
 
-add_executable(MazeRacer2D ./source/main.c ./source/player_queue.c)
+add_executable(MazeRacer2D ${SRC})

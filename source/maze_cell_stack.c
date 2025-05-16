@@ -70,6 +70,8 @@ int maze_cell_stack_push(maze_cell_stack_t* stack, maze_cell_stack_type_t data) 
     }
 
     ++stack->size;
+
+    printf("pushed\n");
     
     return SUCCESS;
 }
