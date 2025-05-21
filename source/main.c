@@ -3,14 +3,9 @@
 #include "maze_cell_stack.h"
 
 int main(void) {
-    maze_t* maze = generate_maze(5, 5);
+    maze_t* maze = generate_maze(20, 20);
 
-    for(int row = 0; row < 5; ++row) {
-        for(int column = 0; column < 5; ++column) {
-            printf("%d ", maze->cells[row][column]);
-        }
-        printf("\n");
-    }
+    print_maze(maze);
 
     free_maze(maze);
 

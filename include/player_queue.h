@@ -7,6 +7,7 @@
 #define PLAYER_QUEUE_H
 
 #include <stddef.h>
+#include <winsock2.h>
 
 #ifndef TRUE
 # define TRUE 1
@@ -22,7 +23,8 @@
 # define ERROR 1
 #endif //ERROR
 
-typedef int player_queue_type_t;
+//for future portability.
+typedef SOCKET player_queue_type_t;
 
 typedef struct player_queue_node {
     player_queue_type_t data;
@@ -45,6 +47,7 @@ int player_queue_push(player_queue_t* queue, player_queue_type_t data);
 int player_queue_pop(player_queue_t* queue);
 int player_queue_clear(player_queue_t* queue);
 int player_queue_is_empty(player_queue_t* queue);
+size_t player_queue_size(player_queue_t* queue);
 
 #endif //PLAYER_QUEUE_H
 

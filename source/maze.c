@@ -3,6 +3,7 @@
 // Date: 5/9/2025
 // Purpose: To implement the api defined in maze_cell.h
 
+#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -48,12 +49,37 @@ int maze_cell_remove_wall(maze_cell_t* cell, uint8_t direction) {
 }
 
 int maze_cell_check_wall(maze_cell_t* cell, uint8_t direction) {
-    if(*cell & direction) return TRUE;
-    return FALSE;
+    if(*cell & direction) return FALSE;
+    return TRUE;
+}
+
+int maze_is_move_valid(maze_t* maze, maze_size_t old_row, maze_size_t old_column, maze_size_t new_row, maze_size_t new_column) {
+    //first check if difference between old and new cell coordinates is > 1
+    if(abs(new_row - old_row) > 1) return FALSE;
+    if(abs(new_column - old_row) > 1) return FALSE;
+
+    //check if move is adjacent vertically or horizontally, diagonals aren't allowed
+    if(new_row != old_row && new_column != old_column) return FALSE;
+
+    //check for walls in the moved direction.
+    uint8_t direction;
+
+    if(new_row == old_row - 1) {
+        direction = NORTH;
+    } else if(new_row == old_row + 1) {
+        direction = SOUTH;
+    } else if(new_column == old_column - 1) {
+        direction = WEST;
+    } else if(new_column == old_column + 1) {
+        direction = EAST;
+    }
+
+    if(maze_cell_check_wall(&maze->cells[old_row][old_column], direction) == TRUE) return FALSE;
+
+    return TRUE;
 }
 
 void backtrack_recursive(int rows, int columns, int row, int column, temp_cell_t** temp_cells) {
-    printf("recursed, (%d, %d)\n", row, column);
     temp_cell_t* current_cell = &temp_cells[row][column];
 
     //mark cell as visited.
@@ -107,17 +133,13 @@ maze_t* generate_maze(maze_size_t rows, maze_size_t columns) {
     //start at the top left corner of the maze, (0, 0).
     backtrack_recursive(rows, columns, 0, 0, temp_cells);
 
-    printf("finished recursion\n");
-
     //copy only cell component of temp cells structure to maze structure.
     for(int row = 0; row < rows; ++row) {
         for(int column = 0; column < columns; ++column) {
-            printf("(%d, %d) - %d\n", row, column, temp_cells[row][column].cell);
+            //printf("(%d, %d) - %d\n", row, column, temp_cells[row][column].cell);
             maze->cells[row][column] = temp_cells[row][column].cell;
         }
     }
-
-    printf("reached\n");
 
     for(int row = 0; row < rows; ++row)
         free(temp_cells[row]);
@@ -135,4 +157,52 @@ int free_maze(maze_t* maze) {
     free(maze);
     
     return SUCCESS;
+}
+
+void print_maze(maze_t* maze) {
+    size_t print_rows = 3 * maze->rows;
+    size_t print_columns = 3 * maze->columns;
+    //printf("%d, %d", maze->rows, maze->columns);
+    char wall_char = 'x';
+
+    //allocate space for the printed representation of the maze.
+    char** print_maze = malloc(sizeof(char*) * print_rows);
+    for(int row = 0; row < print_rows; ++row) {
+        print_maze[row] = malloc(print_columns);
+        memset(print_maze[row], wall_char, print_columns);
+    }
+
+    for(maze_size_t row = 1; row < print_rows; row += 3) {
+        for(maze_size_t column = 1; column < print_columns; column += 3) {
+            uint8_t directions[4] = { NORTH, SOUTH, EAST, WEST };
+            for(int i = 0; i < 4; ++i) {
+                if(maze_cell_check_wall(&maze->cells[(row - 1) / 3][(column - 1) / 3], directions[i]) == FALSE) {
+                    print_maze[row][column] = ' ';
+                    if(directions[i] == NORTH) {
+                        print_maze[row - 1][column] = ' ';
+                    } else if(directions[i] == SOUTH) {
+                        print_maze[row + 1][column] = ' ';
+                    } else if(directions[i] == EAST) {
+                        print_maze[row][column + 1] = ' ';
+                    } else if(directions[i] == WEST) {
+                        print_maze[row][column - 1] = ' ';
+                    }
+                }
+            }
+        }
+    }
+
+    for(size_t row = 0; row < print_rows; ++row) {
+        for(size_t column = 0; column < print_columns; ++column) 
+            printf("%c ", print_maze[row][column]);
+        printf("\n");
+    }
+
+
+    //free the space allocated.
+    for(int row = 0; row < print_rows; ++row)
+        free(print_maze[row]);
+    free(print_maze);
+
+    return;
 }

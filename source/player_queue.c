@@ -120,3 +120,12 @@ int player_queue_is_empty(player_queue_t* queue) {
     if(queue->size > 0) return FALSE;
     return TRUE;
 }
+
+size_t player_queue_size(player_queue_t* queue) {
+    if(!queue) {
+        fprintf(stderr, "cannot query size of an invalid stack\n");
+        return ERROR;
+    }
+
+    return queue->size;
+}

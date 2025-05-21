@@ -59,13 +59,17 @@ int maze_cell_remove_wall(maze_cell_t* cell, uint8_t direction);
 //the given direction and TRUE if a wall does exist.
 int maze_cell_check_wall(maze_cell_t* cell, uint8_t direction);
 
+int maze_is_move_valid(maze_t* maze, maze_size_t old_row, maze_size_t old_column, maze_size_t new_row, maze_size_t new_column);
+
 void backtrack_recursive(int rows, int columns, int row, int column, temp_cell_t** temp_cells);
 
 //given rows and columns, will return a randomly generated 2D maze of
 //rows * columns cells, using recursive backtracking.
 maze_t* generate_maze(maze_size_t rows, maze_size_t columns);
 
-//given a valid 2D maze cell array, will deallocate/free everything.
+//given a valid 2D maze, will deallocate/free everything.
 int free_maze(maze_t* maze);
+
+void print_maze(maze_t* maze);
 
 #endif //MAZE_CELL_H
