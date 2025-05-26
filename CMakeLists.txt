@@ -7,10 +7,16 @@ cmake_minimum_required(VERSION 3.10)
 
 project(MazeRacer2D)
 
-# include library and in-house directories.
-
-include_directories(${CMAKE_SOURCE_DIR}/include)
-
 file(GLOB SRC "./source/*.c")
 
 add_executable(MazeRacer2D ${SRC})
+
+#add_subdirectory(${CMAKE_SOURCE_DIR}/libraries/SDL2)
+
+#target_include_directories(MazeRacer2D PRIVATE ${CMAKE_BINARY_DIR}/libraries/SDL2/include)
+
+target_include_directories(MazeRacer2D PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+target_link_libraries(MazeRacer2D PRIVATE ws2_32)
+
+

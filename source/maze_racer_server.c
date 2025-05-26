@@ -3,14 +3,15 @@
 // Date: 5/19/2025
 // Purpose: To implement the server side of the application.
 
-#include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <SDL_thread.h>
+#include <windows.h>
 
 #include "player_queue.h"
+#include "networking_utils.h"
 
 #ifndef EXIT_SUCCESS
 # define EXIT_SUCCESS 0
@@ -41,48 +42,69 @@
 
 //help message for server ui
 const char* SERVER_UI_WELCOME = "Welcome to the MRMP server interface!";
-const char* SERVER_UI_HELP =    "=================================================\n"
-                                "Below are a list of available commands:\n"
-                                "=================================================\n"
-                                "stat : Display the # of total and active\n" 
-                                "       connections and sessions.\n"
-                                "help : Display this very same help message.\n"
-                                "++v  : Enable verbosity.\n"
-                                "--v  : Disable verbosity.\n"
-                                "exit : Exit the server process, shutting down everything.\n";
+const char* SERVER_UI_HELP =    "Below are a list of available commands:\n"
+                                "\tstat : Display the # of total and active\n" 
+                                "\t       connections and sessions.\n"
+                                "\thelp : Display this very same help message.\n"
+                                "\t++v  : Enable verbosity.\n"
+                                "\t--v  : Disable verbosity.\n"
+                                "\texit : Exit the server process, shutting down everything.\n";
 
-//stores all ready players
-static player_queue_t* queue = NULL;
+//for client connection/ready player tracking purposes.
+static player_queue_t* player_queue = NULL;
 static SOCKET listen_socket = INVALID_SOCKET;
+static HANDLE session_threads[MAX_SESSION_THREADS];
+
+//stores the next available cell in the client_sockets array to store an accepted client connection.
+static int next_thread_idx = 0;
 
 //for statistical/debug purposes.
 static int total_connections = 0;
-static int active_connections = 0;
+static volatile int active_connections = 0; //needs concurrency.
 static int total_sessions = 0;
-static int active_sessions = 0;
+static volatile int active_sessions = 0; //needs concurrency.
+
+//other server specific variables.
 static int verbose = FALSE;
+static volatile int quit = FALSE;
+static HANDLE server_ui_thread;
+static HANDLE create_sessions_thread;
+static HANDLE player_queue_critsec;
+static HANDLE server_state_critsec;
 
 //functions
 void cleanup(void);
-int server_ui(void* data);
-int client_limbo(void* data);
-int do_session(void* session_state);
+
+int check_socket(SOCKET socket);
+
+DWORD WINAPI server_ui(LPVOID data);
+DWORD WINAPI client_limbo(LPVOID data);
+DWORD WINAPI do_session(LPVOID session_state);
+DWORD WINAPI create_sessions(LPVOID data);
 
 int main(void) {
     //register functions to be called at exit().
     atexit(cleanup);
 
-    //initialize SDL
-    if(SDL_Init(0) != 0) {
-        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+    InitializeCriticalSection(&player_queue_critsec);
+    InitializeCriticalSection(&server_state_critsec);
+
+    //start up minimal user interface thread.
+    server_ui_thread = CreateThread(NULL, 0, server_ui, NULL, 0, NULL);
+    if(server_ui_thread == NULL) {
+        fprintf(stderr, "failed to create user interface thread.\n");
         return EXIT_FAILURE;
     }
 
-    //start up minimal user interface thread.
-    SDL_Thread* server_ui_thread = SDL_CreateThread(server_ui, "MRMP Server UI Thread", server_ui_thread);
-
     //initialize player queue.
-    queue = player_queue_init();
+    player_queue = player_queue_init();
+
+    //start up session creation thread.
+    create_sessions_thread = CreateThread(NULL, 0, create_sessions, NULL, 0, NULL);
+    if(create_sessions_thread == NULL) {
+        fprintf(stderr, "failed to create create sessions thread.\n");
+        return EXIT_FAILURE;
+    }
 
     //initialize winsock.
     WSADATA wsa_data;
@@ -118,7 +140,7 @@ int main(void) {
 
     int bind_result = bind(listen_socket, result->ai_addr, (int)result->ai_addrlen);
     if(bind_result == SOCKET_ERROR) {
-        fprintf("bind failed with error: %d\n", WSAGetLastError());
+        fprintf(stderr, "bind() failed with error: %d\n", WSAGetLastError());
         freeaddrinfo(result);
         closesocket(listen_socket);
         WSACleanup();
@@ -129,21 +151,37 @@ int main(void) {
     freeaddrinfo(result);
 
     if (listen(listen_socket, SOMAXCONN) == SOCKET_ERROR) {
-        fprintf(stderr, "listen failed with error: %ld\n", WSAGetLastError());
+        fprintf(stderr, "listen() failed with error: %ld\n", WSAGetLastError());
         closesocket(listen_socket);
         WSACleanup();
         return EXIT_FAILURE;
     }
 
     //client connection listen loop.
-    while(1) {
-        SOCKET client_socket = accept(listen_socket, NULL, NULL);
-        if (client_socket == INVALID_SOCKET) {
-            fprintf(stderr, "accept failed: %d\n", WSAGetLastError());
+    while(quit != TRUE) {
+        if(active_connections > MAX_CLIENT_CONNECTIONS) continue;
+        
+        SOCKET* client_socket = malloc(sizeof(SOCKET));
+        if(client_socket == NULL) {
+            fprintf(stderr, "failed to malloc() client socket pointer.\n");
+            continue;
+        }
+
+        *client_socket = accept(listen_socket, NULL, NULL);
+        if (*client_socket == INVALID_SOCKET) {
+            fprintf(stderr, "accept() failed: %d\n", WSAGetLastError());
+            free(client_socket);
             continue;
         }
 
         //create a new thread to house client connection.
+        HANDLE limbo_thread = CreateThread(NULL, 0, client_limbo, client_socket, 0, NULL);
+        if(limbo_thread == NULL) {
+            fprintf(stderr, "failed to create client limbo thread.\n");
+            closesocket(*client_socket);
+            free(client_socket);
+        }
+        CloseHandle(limbo_thread);
     }
 
     return EXIT_SUCCESS;
@@ -151,14 +189,26 @@ int main(void) {
 
 void cleanup(void) {
     closesocket(listen_socket);
-    player_queue_free(queue);
+
+    //TODO: make sure this is the right way to clean up a critical section.
+    //DeleteCriticalSection(cr)
+
+
+    WaitForSingleObject(create_sessions_thread, INFINITE);
+    CloseHandle(create_sessions_thread);
+
+    player_queue_free(player_queue);
+
+    WaitForSingleObject(server_ui_thread, INFINITE);
+    CloseHandle(server_ui_thread);
 }
 
-int server_ui(void* data) {
-    //detach this thread so we dont have to worry about cleaning it up.
-    SDL_DetachThread((SDL_Thread*) data);
+int check_socket(SOCKET socket) {
+    
+}
 
-    char cmd_buffer[CMD_MAX_LEN + 1];
+DWORD WINAPI server_ui(LPVOID data) {
+    char cmd_buffer[CMD_MAX_LEN + 2]; //+2 for new line and null byte.
 
     //introduction.
     printf("%s\n%s\n", SERVER_UI_WELCOME, SERVER_UI_HELP);
@@ -166,7 +216,13 @@ int server_ui(void* data) {
     //styling.
     printf(">> ");
     //setup simple terminal.
-    while(fgets(cmd_buffer, CMD_MAX_LEN, stdin) != NULL) {
+    while(fgets(cmd_buffer, CMD_MAX_LEN + 2, stdin) != NULL) {
+        ssize_t len = strlen(cmd_buffer);
+        if(len > 0 && cmd_buffer[len - 1] != '\n') {
+            int c;
+            while(c = getchar() != '\n' && c != EOF); //clear stdin.
+        }
+
         if(strncmp(cmd_buffer, CMD_EXIT, 4) == 0) {
             printf("Server process is exiting...\n");
             break;
@@ -185,7 +241,7 @@ int server_ui(void* data) {
             if(verbose == FALSE) {
                 printf("Verbose mode is disabled.\n");
             } else {
-                verbose = TRUE;
+                verbose = FALSE;
                 printf("Disabled verbose mode.\n");
             }
         } else {
@@ -194,5 +250,59 @@ int server_ui(void* data) {
         printf(">> ");
     }
 
-    exit(EXIT_SUCCESS);
+    quit = TRUE;
+
+    return 0;
+}
+
+DWORD WINAPI client_limbo(LPVOID data) {
+    
+    return 0;
+}
+
+DWORD WINAPI do_session(LPVOID session_state) {
+    session_t* session = session_state;
+}
+
+DWORD WINAPI create_sessions(LPVOID data) {
+    //TODO: look into windows condition variables.
+    while(quit != TRUE) {
+        EnterCriticalSection(&player_queue_critsec);
+        //check if there is at least 2 players waiting in queue.
+        //TODO: does reading active_sessions need to be locked?
+        while(player_queue_size(player_queue) >= 2 && active_sessions <= MAX_SESSION_THREADS) {
+            //check validity of player sockets.
+            SOCKET* player_one_sock = malloc(sizeof(SOCKET));
+            SOCKET* player_two_sock = malloc(sizeof(SOCKET));
+
+
+            *player_one_sock = *player_queue_front(player_queue);
+            player_queue_pop(player_queue);
+            if(*player_one_sock == INVALID_SOCKET) {
+                free(player_one_sock);
+
+                //peek at player two's socket to see if 
+
+                continue; //move onto next iteration, hoping the next socket is still valid.
+            }
+
+            SOCKET* player_two_sock = malloc(sizeof(SOCKET));
+            *player_two_sock = *player_queue_front(player_queue);
+            player_queue_pop(player_queue);
+            if(*player_two_sock == INVALID_SOCKET) {
+                //move player one to the back of the player queue, they got unlucky.
+                player_queue_push(player_queue, *player_one_sock);
+                free(player_one_sock);
+
+                free(player_two_sock);
+                continue; //move onto next iteration, hoping the next 2 sockets are still valid.
+            }
+
+        }
+
+        LeaveCriticalSection(&player_queue_critsec);
+    }
+
+
+    return 0;
 }

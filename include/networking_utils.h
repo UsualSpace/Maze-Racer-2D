@@ -61,30 +61,30 @@ typedef struct mrmp_pkt_result {
     mrmp_winner_t winner;
 } mrmp_pkt_bad_move_t; 
 
-typedef struct session_state {
+typedef struct session {
     SOCKET player_one;
     SOCKET player_two;
     uint8_t player_one_row;
     uint8_t player_one_column;
     uint8_t player_two_row;
     uint8_t player_two_column;
-} session_state_t;
+} session_t;
 
-int send_error_pkt();
-int send_hello_pkt();
-int send_join_pkt();
-int send_join_resp_pkt();
-int send_leave_pkt();
-int send_move_pkt();
-int send_bad_move_pkt();
+// int send_error_pkt();
+// int send_hello_pkt();
+// int send_join_pkt();
+// int send_join_resp_pkt();
+// int send_leave_pkt();
+// int send_move_pkt();
+// int send_bad_move_pkt();
 
-int handle_error_pkt();
-int handle_hello_pkt();
-int handle_join_pkt();
-int handle_leave_pkt();
-int handle_move_pkt();
-int handle_bad_move_pkt();
+// int process_error_pkt();
+// int process_hello_pkt();
+// int process_join_pkt();
+// int process_leave_pkt();
+// int process_move_pkt();
+// //int process _bad_move_pkt();
 
-void accept_server_message(void* client_state);
-void accept_client_message(void* session_state);
+// void get_handle_server_message(void* client_state);
+// void get_handle_client_message(void* state);
 

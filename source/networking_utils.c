@@ -35,3 +35,9 @@ const char* code_to_error[] = {
     "player queue has reached maximum capacity"
 };
 
+// void fetch_server_message(void* client_state);
+
+// void handle_session_message(int player, void* session_state) {
+    
+// }
+
