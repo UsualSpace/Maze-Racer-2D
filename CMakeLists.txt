@@ -7,16 +7,23 @@ cmake_minimum_required(VERSION 3.10)
 
 project(MazeRacer2D)
 
-file(GLOB SRC "./source/*.c")
+file(GLOB LIBSRC "${CMAKE_CURRENT_SOURCE_DIR}/source/*.c")
 
-add_executable(MazeRacer2D ${SRC})
+list(REMOVE_ITEM LIBSRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/source/maze_racer_server.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/source/maze_racer_test_client.c"
+)
+
+add_executable(MazeRacerServer ${CMAKE_CURRENT_SOURCE_DIR}/source/maze_racer_server.c ${LIBSRC})
+add_executable(MazeRacerTestClient ${CMAKE_CURRENT_SOURCE_DIR}/source/maze_racer_test_client.c ${LIBSRC})
 
 #add_subdirectory(${CMAKE_SOURCE_DIR}/libraries/SDL2)
 
 #target_include_directories(MazeRacer2D PRIVATE ${CMAKE_BINARY_DIR}/libraries/SDL2/include)
 
-target_include_directories(MazeRacer2D PRIVATE ${CMAKE_SOURCE_DIR}/include)
+include_directories(${CMAKE_SOURCE_DIR}/include)
 
-target_link_libraries(MazeRacer2D PRIVATE ws2_32)
+target_link_libraries(MazeRacerServer ws2_32)
+target_link_libraries(MazeRacerTestClient ws2_32)
 
 

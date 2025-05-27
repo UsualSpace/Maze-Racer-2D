@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <process.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -28,10 +29,10 @@
 #endif //FALSE
 
 //defines
-#define MAX_SESSION_THREADS     10
-#define MAX_CLIENT_CONNECTIONS (MAX_SESSION_THREADS * 2)
-#define MAX_TIMEOUT_SECONDS     10
-#define DEFAULT_LISTEN_PORT     "9898"
+#define MAX_SESSION_THREADS         10
+#define MAX_CLIENT_CONNECTIONS      (MAX_SESSION_THREADS * 2)
+#define DEFAULT_TIMEOUT_SECONDS     10
+#define MRMP_VERSION                0
 
 #define CMD_EXIT    "exit"
 #define CMD_STAT    "stat"
@@ -75,22 +76,20 @@ static HANDLE server_state_critsec;
 //functions
 void cleanup(void);
 
-int check_socket(SOCKET socket);
-
-DWORD WINAPI server_ui(LPVOID data);
-DWORD WINAPI client_limbo(LPVOID data);
-DWORD WINAPI do_session(LPVOID session_state);
-DWORD WINAPI create_sessions(LPVOID data);
+unsigned __stdcall server_ui(void* data);
+unsigned __stdcall client_limbo(void* data);
+unsigned __stdcall do_session(void* session_state);
+unsigned __stdcall create_sessions(void* data);
 
 int main(void) {
     //register functions to be called at exit().
     atexit(cleanup);
 
-    InitializeCriticalSection(&player_queue_critsec);
-    InitializeCriticalSection(&server_state_critsec);
+    // InitializeCriticalSection(&player_queue_critsec);
+    // InitializeCriticalSection(&server_state_critsec);
 
     //start up minimal user interface thread.
-    server_ui_thread = CreateThread(NULL, 0, server_ui, NULL, 0, NULL);
+    server_ui_thread = (HANDLE)_beginthreadex(NULL, 0, &server_ui, NULL, 0, NULL);
     if(server_ui_thread == NULL) {
         fprintf(stderr, "failed to create user interface thread.\n");
         return EXIT_FAILURE;
@@ -100,7 +99,7 @@ int main(void) {
     player_queue = player_queue_init();
 
     //start up session creation thread.
-    create_sessions_thread = CreateThread(NULL, 0, create_sessions, NULL, 0, NULL);
+    create_sessions_thread = (HANDLE)_beginthreadex(NULL, 0, &create_sessions, NULL, 0, NULL);
     if(create_sessions_thread == NULL) {
         fprintf(stderr, "failed to create create sessions thread.\n");
         return EXIT_FAILURE;
@@ -122,7 +121,7 @@ int main(void) {
     hints.ai_protocol = IPPROTO_TCP;
     hints.ai_flags = AI_PASSIVE;
 
-    int getaddrinfo_result = getaddrinfo(NULL, DEFAULT_LISTEN_PORT, &hints, &result);
+    int getaddrinfo_result = getaddrinfo(NULL, MRMP_DEFAULT_PORT, &hints, &result);
     if(getaddrinfo_result != 0) {
         fprintf(stderr, "getaddrinfo failed: %d\n", getaddrinfo_result);
         WSACleanup();
@@ -157,6 +156,13 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
+    //make listen socket non-blocking for accept.
+    u_long mode = 1; 
+    int ioctl_result = ioctlsocket(listen_socket, FIONBIO, &mode);
+    if(ioctl_result != NO_ERROR) {
+        fprintf(stderr, "ioctlsocket failed with error: %ld\n", ioctl_result);
+    }
+
     //client connection listen loop.
     while(quit != TRUE) {
         if(active_connections > MAX_CLIENT_CONNECTIONS) continue;
@@ -169,15 +175,20 @@ int main(void) {
 
         *client_socket = accept(listen_socket, NULL, NULL);
         if (*client_socket == INVALID_SOCKET) {
-            fprintf(stderr, "accept() failed: %d\n", WSAGetLastError());
+            //fprintf(stderr, "accept() failed: %d\n", WSAGetLastError());
             free(client_socket);
             continue;
         }
 
+        //set a timeout value for future recv operations.
+        DWORD timeout = DEFAULT_TIMEOUT_SECONDS * 1000;
+        setsockopt(*client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*) &timeout, sizeof(timeout));
+
         //create a new thread to house client connection.
-        HANDLE limbo_thread = CreateThread(NULL, 0, client_limbo, client_socket, 0, NULL);
+        HANDLE limbo_thread = (HANDLE)_beginthreadex(NULL, 0, &client_limbo, client_socket, 0, NULL);
         if(limbo_thread == NULL) {
             fprintf(stderr, "failed to create client limbo thread.\n");
+            //TODO: use shutdown for clean disconnect.
             closesocket(*client_socket);
             free(client_socket);
         }
@@ -189,6 +200,7 @@ int main(void) {
 
 void cleanup(void) {
     closesocket(listen_socket);
+    WSACleanup();
 
     //TODO: make sure this is the right way to clean up a critical section.
     //DeleteCriticalSection(cr)
@@ -203,11 +215,7 @@ void cleanup(void) {
     CloseHandle(server_ui_thread);
 }
 
-int check_socket(SOCKET socket) {
-    
-}
-
-DWORD WINAPI server_ui(LPVOID data) {
+unsigned __stdcall server_ui(void* data) {
     char cmd_buffer[CMD_MAX_LEN + 2]; //+2 for new line and null byte.
 
     //introduction.
@@ -252,57 +260,139 @@ DWORD WINAPI server_ui(LPVOID data) {
 
     quit = TRUE;
 
+    _endthreadex(0);
     return 0;
 }
 
-DWORD WINAPI client_limbo(LPVOID data) {
+unsigned __stdcall client_limbo(void* client_socket) {
+    SOCKET socket = *(SOCKET*) client_socket;
     
+    //temporary fix to repetitive cleanup code.
+    int exit_flag = FALSE;
+
+    //try to receive a hello packet, if it's not received correctly or in time, send an error packet 
+    //and or shutdown and close the socket.
+    mrmp_pkt_hello_t* hello_msg = NULL;
+    int hello_result = receive_mrmp_msg(socket, (void**) &hello_msg);
+
+    switch(hello_result) {
+        case GRACEFUL_DC:
+            send_error_pkt(socket, MRMP_ERR_UNKNOWN); //TODO: do we need this?
+            shutdown(socket, SD_BOTH);
+            exit_flag = TRUE;
+            break;
+        case DISGRACEFUL_DC:
+            exit_flag = TRUE;
+            break;
+        case TIMEDOUT:
+            send_timeout_pkt(socket);
+            shutdown(socket, SD_BOTH);
+            exit_flag = TRUE;
+            break;
+        default:
+            break;
+    };
+
+    if(hello_msg->header.opcode != MRMP_OPCODE_HELLO) {
+        send_error_pkt(socket, MRMP_ERR_ILLEGAL_OPCODE);
+        shutdown(socket, SD_BOTH);
+        exit_flag = TRUE;
+    } else if(hello_msg->version != MRMP_VERSION) {
+        send_error_pkt(socket, MRMP_ERR_VERSION_MISMATCH);
+        shutdown(socket, SD_BOTH);
+        exit_flag = TRUE;
+    }
+
+    if(exit_flag == TRUE) {
+        closesocket(socket);
+        free(hello_msg);
+        free(client_socket);
+        _endthreadex(0);
+    }
+
+    free(hello_msg);
+
+    //succesful hello performed, send an app layer acknowledgment.
+    send_hello_ack_pkt(socket);
+
+    //exact same code but for the ready packet. TODO: find a better less repetitive way to handle this?
+    mrmp_pkt_header_t* join_msg = NULL;
+    int join_result = receive_mrmp_msg(socket, (void**) &join_msg);
+
+    switch(join_result) {
+        case GRACEFUL_DC:
+            send_error_pkt(socket, MRMP_ERR_UNKNOWN); //TODO: do we need this?
+            shutdown(socket, SD_BOTH);
+            exit_flag = TRUE;
+            break;
+        case DISGRACEFUL_DC:
+            exit_flag = TRUE;
+            break;
+        case TIMEDOUT:
+            send_timeout_pkt(socket);
+            shutdown(socket, SD_BOTH);
+            exit_flag = TRUE;
+            break;
+        default:
+            break;
+    };
+
+    if(join_msg->opcode != MRMP_OPCODE_JOIN) {
+        send_error_pkt(socket, MRMP_ERR_ILLEGAL_OPCODE);
+        shutdown(socket, SD_BOTH);
+        exit_flag = TRUE;
+    }
+
+    if(exit_flag == TRUE) {
+        closesocket(socket);
+        free(join_msg);
+        free(client_socket);
+        _endthreadex(0);
+    }
+
+    free(join_msg);
+
+    //successful join request, add them to the player queue and end this thread.
+    // EnterCriticalSection(&player_queue_critsec);
+    // player_queue_push(player_queue, &socket);
+    // LeaveCriticalSection(&player_queue_critsec);
+
+    shutdown(socket, SD_BOTH);
+    closesocket(socket);
+
+    free(client_socket);
+    _endthreadex(0);
     return 0;
 }
 
-DWORD WINAPI do_session(LPVOID session_state) {
+unsigned __stdcall do_session(void* session_state) {
     session_t* session = session_state;
+
+    _endthreadex(0);
+    return 0;
 }
 
-DWORD WINAPI create_sessions(LPVOID data) {
+unsigned __stdcall create_sessions(void* data) {
     //TODO: look into windows condition variables.
     while(quit != TRUE) {
-        EnterCriticalSection(&player_queue_critsec);
-        //check if there is at least 2 players waiting in queue.
-        //TODO: does reading active_sessions need to be locked?
-        while(player_queue_size(player_queue) >= 2 && active_sessions <= MAX_SESSION_THREADS) {
-            //check validity of player sockets.
-            SOCKET* player_one_sock = malloc(sizeof(SOCKET));
-            SOCKET* player_two_sock = malloc(sizeof(SOCKET));
+        // EnterCriticalSection(&player_queue_critsec);
+        // //check if there is at least 2 players waiting in queue.
+        // //TODO: does reading active_sessions need to be locked?
+        // while(player_queue_size(player_queue) >= 2 && active_sessions <= MAX_SESSION_THREADS) {
+        //     //check validity of player sockets.
+        //     SOCKET* player_one_sock = malloc(sizeof(SOCKET));
+        //     SOCKET* player_two_sock = malloc(sizeof(SOCKET));
 
+        //     *player_one_sock = *player_queue_front(player_queue);
+        //     player_queue_pop(player_queue);
+        //     *player_two_sock = *player_queue_front(player_queue);
+        //     player_queue_pop(player_queue);
+        // }
 
-            *player_one_sock = *player_queue_front(player_queue);
-            player_queue_pop(player_queue);
-            if(*player_one_sock == INVALID_SOCKET) {
-                free(player_one_sock);
-
-                //peek at player two's socket to see if 
-
-                continue; //move onto next iteration, hoping the next socket is still valid.
-            }
-
-            SOCKET* player_two_sock = malloc(sizeof(SOCKET));
-            *player_two_sock = *player_queue_front(player_queue);
-            player_queue_pop(player_queue);
-            if(*player_two_sock == INVALID_SOCKET) {
-                //move player one to the back of the player queue, they got unlucky.
-                player_queue_push(player_queue, *player_one_sock);
-                free(player_one_sock);
-
-                free(player_two_sock);
-                continue; //move onto next iteration, hoping the next 2 sockets are still valid.
-            }
-
-        }
-
-        LeaveCriticalSection(&player_queue_critsec);
+        // LeaveCriticalSection(&player_queue_critsec);
     }
 
 
+    _endthreadex(0);
     return 0;
 }
