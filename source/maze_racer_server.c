@@ -31,7 +31,7 @@
 //defines
 #define MAX_SESSION_THREADS         10
 #define MAX_CLIENT_CONNECTIONS      (MAX_SESSION_THREADS * 2)
-#define DEFAULT_TIMEOUT_SECONDS     10
+#define DEFAULT_TIMEOUT_SECONDS     1
 #define MRMP_VERSION                0
 
 #define CMD_EXIT    "exit"
@@ -182,16 +182,25 @@ int main(void) {
 
         //set a timeout value for future recv operations.
         DWORD timeout = DEFAULT_TIMEOUT_SECONDS * 1000;
-        setsockopt(*client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*) &timeout, sizeof(timeout));
+        int setsockopt_result = setsockopt(*client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*) &timeout, sizeof(timeout));
+        if(setsockopt_result == SOCKET_ERROR) {
+            fprintf(stderr, "setsockopt failed with %u\n", WSAGetLastError());
+            send_error_pkt(*client_socket, MRMP_ERR_UNKNOWN);
+            shutdown(*client_socket, SD_SEND);
+            closesocket(*client_socket);
+            free(client_socket);
+        }
 
         //create a new thread to house client connection.
         HANDLE limbo_thread = (HANDLE)_beginthreadex(NULL, 0, &client_limbo, client_socket, 0, NULL);
         if(limbo_thread == NULL) {
             fprintf(stderr, "failed to create client limbo thread.\n");
-            //TODO: use shutdown for clean disconnect.
+            send_error_pkt(*client_socket, MRMP_ERR_UNKNOWN);
+            shutdown(*client_socket, SD_SEND);
             closesocket(*client_socket);
             free(client_socket);
         }
+
         CloseHandle(limbo_thread);
     }
 
@@ -274,20 +283,23 @@ unsigned __stdcall client_limbo(void* client_socket) {
     //and or shutdown and close the socket.
     mrmp_pkt_hello_t* hello_msg = NULL;
     int hello_result = receive_mrmp_msg(socket, (void**) &hello_msg);
-
+    
     switch(hello_result) {
         case GRACEFUL_DC:
             send_error_pkt(socket, MRMP_ERR_UNKNOWN); //TODO: do we need this?
-            shutdown(socket, SD_BOTH);
+            shutdown(socket, SD_SEND);
             exit_flag = TRUE;
+            printf("GRACEFUL DC\n");
             break;
         case DISGRACEFUL_DC:
             exit_flag = TRUE;
+            printf("DISGRACEFUL DC\n");
             break;
         case TIMEDOUT:
             send_timeout_pkt(socket);
-            shutdown(socket, SD_BOTH);
+            shutdown(socket, SD_SEND);
             exit_flag = TRUE;
+            printf("TIMEDOUT\n");
             break;
         default:
             break;
@@ -295,12 +307,15 @@ unsigned __stdcall client_limbo(void* client_socket) {
 
     if(hello_msg->header.opcode != MRMP_OPCODE_HELLO) {
         send_error_pkt(socket, MRMP_ERR_ILLEGAL_OPCODE);
-        shutdown(socket, SD_BOTH);
+        shutdown(socket, SD_SEND);
         exit_flag = TRUE;
     } else if(hello_msg->version != MRMP_VERSION) {
+        if(verbose == TRUE)
+            printf("Recieved hello packet, version %d\n", hello_msg->version);
         send_error_pkt(socket, MRMP_ERR_VERSION_MISMATCH);
-        shutdown(socket, SD_BOTH);
+        shutdown(socket, SD_SEND);
         exit_flag = TRUE;
+        printf("wrong version\n");
     }
 
     if(exit_flag == TRUE) {
@@ -322,7 +337,7 @@ unsigned __stdcall client_limbo(void* client_socket) {
     switch(join_result) {
         case GRACEFUL_DC:
             send_error_pkt(socket, MRMP_ERR_UNKNOWN); //TODO: do we need this?
-            shutdown(socket, SD_BOTH);
+            shutdown(socket, SD_SEND);
             exit_flag = TRUE;
             break;
         case DISGRACEFUL_DC:
@@ -330,7 +345,7 @@ unsigned __stdcall client_limbo(void* client_socket) {
             break;
         case TIMEDOUT:
             send_timeout_pkt(socket);
-            shutdown(socket, SD_BOTH);
+            shutdown(socket, SD_SEND);
             exit_flag = TRUE;
             break;
         default:
@@ -339,7 +354,7 @@ unsigned __stdcall client_limbo(void* client_socket) {
 
     if(join_msg->opcode != MRMP_OPCODE_JOIN) {
         send_error_pkt(socket, MRMP_ERR_ILLEGAL_OPCODE);
-        shutdown(socket, SD_BOTH);
+        shutdown(socket, SD_SEND);
         exit_flag = TRUE;
     }
 
@@ -357,7 +372,7 @@ unsigned __stdcall client_limbo(void* client_socket) {
     // player_queue_push(player_queue, &socket);
     // LeaveCriticalSection(&player_queue_critsec);
 
-    shutdown(socket, SD_BOTH);
+    shutdown(socket, SD_SEND);
     closesocket(socket);
 
     free(client_socket);

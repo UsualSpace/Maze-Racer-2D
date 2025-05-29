@@ -123,10 +123,7 @@ int process_leave_pkt(SOCKET socket, session_t* session, mrmp_pkt_move_t* pkt);
 int process_move_pkt(SOCKET socket, session_t* session, mrmp_pkt_move_t* pkt);
 int process_bad_move_pkt(SOCKET socket, session_t* session);
 
-//a return value of ERROR indicates something is wrong with the socket, assume the worst because I am lazy. Should terminate whatever
-//function was being executed that called this. The socket should be shutdown and closed after ERROR is returned.
-//on a return value of SUCCESS, assume the message is fully constructed and can be safely cast into a header structure for further processing.
-//caller is responsible for freeing msg.
+int recv_w_timeout(SOCKET s, DWORD timeout_ms);
 int receive_mrmp_msg(SOCKET socket, void** out_msg);
 
 #endif //NETWORKING_UTILS_H
