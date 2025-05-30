@@ -72,22 +72,27 @@ int main(int argc, char* argv[]) {
 
     int hello_result = send_hello_pkt(connect_socket, 0);
 
-    void* msg = NULL;
-    receive_mrmp_msg(connect_socket, &msg);
-    // if(((mrmp_pkt_error_t*) msg)->error_code == MRMP_ERR_VERSION_MISMATCH) {
-    //     printf("Received version mismatch error packet!\n");
-    // } else {
-    //     //printf("Did NOT receive version mismatch error packet :(\n");
-    // }
-
+    char* msg = NULL;
+    receive_mrmp_msg(connect_socket, &msg, NULL);
     if(((mrmp_pkt_header_t*) msg)->opcode == MRMP_OPCODE_HELLO_ACK) {
         printf("Received hello acknowledgement packet!\n");
+        printf("%d\n", ((mrmp_pkt_header_t*) msg)->length);
+        free(msg);
     } else {
         //printf("Did NOT receive hello acknowledgement packet :(\n");
     }
 
+    // send_join_pkt(connect_socket);
 
-    Sleep(12 * 1000);
+    // receive_mrmp_msg(connect_socket, &msg, NULL);
+    // if(((mrmp_pkt_error_t*) msg)->header.opcode == MRMP_OPCODE_ERROR) {
+    //     printf("Received error packet!\n");
+    //     free(msg);
+    // } else {
+    //     //printf("Did NOT receive hello acknowledgement packet :(\n");
+    // }
+
+    Sleep(5 * 1000);
 
     closesocket(connect_socket);
 

@@ -49,6 +49,15 @@ typedef uint8_t mrmp_version_t;
 typedef uint8_t mrmp_error_t;
 typedef uint8_t mrmp_winner_t;
 
+//manually maintain tightly packed sizes of structs due to struct padding throwing off sizes.
+#define MRMP_PKT_HEADER_SIZE (sizeof(mrmp_opcode_t) + sizeof(mrmp_payload_size_t))
+#define MRMP_PKT_ERROR_SIZE (MRMP_PKT_HEADER_SIZE + sizeof(mrmp_error_t))
+#define MRMP_PKT_HELLO_SIZE (MRMP_PKT_HEADER_SIZE + sizeof(mrmp_version_t))
+#define MRMP_PKT_JOIN_RESP_PARTIAL_SIZE (MRMP_HEADER_SIZE + sizeof(mrmp_size_t) * 2) //size of maze isnt known at compile time.
+#define MRMP_PKT_MOVE_SIZE (MRMP_PKT_HEADER_SIZE + sizeof(mrmp_size_t) * 2)
+
+#pragma pack(push, 1) //easy way out, less portable
+ 
 //sufficient for join, leave, bad move packets.
 typedef struct mrmp_pkt_header {
     mrmp_opcode_t opcode;
@@ -78,6 +87,8 @@ typedef struct mrmp_pkt_move {
     maze_size_t column;
 } mrmp_pkt_move_t; 
 
+#pragma pack(pop) //easy way out, less portable
+
 //Can be replaced by mrmp_pkt_move with a different opcode.
 // typedef struct mrmp_pkt_bad_move {
 //     mrmp_pkt_header_t header;
@@ -105,6 +116,9 @@ typedef struct session {
     uint8_t player_two_column;
 } session_t;
 
+int send_buffer(SOCKET socket, char* buffer, size_t buffer_length);
+char* buffer_to_mrmp_pkt_struct(char* buffer);
+
 int send_error_pkt(SOCKET socket, mrmp_error_t error);
 int send_hello_pkt(SOCKET socket, mrmp_version_t version);
 int send_hello_ack_pkt(SOCKET socket);
@@ -123,7 +137,7 @@ int process_leave_pkt(SOCKET socket, session_t* session, mrmp_pkt_move_t* pkt);
 int process_move_pkt(SOCKET socket, session_t* session, mrmp_pkt_move_t* pkt);
 int process_bad_move_pkt(SOCKET socket, session_t* session);
 
-int recv_w_timeout(SOCKET s, DWORD timeout_ms);
-int receive_mrmp_msg(SOCKET socket, void** out_msg);
+int recv_w_timeout(SOCKET socket, char* buffer, int length, int flags, struct timeval* timeout);
+int receive_mrmp_msg(SOCKET socket, char** out_msg, struct timeval* timeout);
 
 #endif //NETWORKING_UTILS_H

@@ -37,6 +37,7 @@
 #define CMD_EXIT    "exit"
 #define CMD_STAT    "stat"
 #define CMD_HELP    "help"
+#define CMD_PQUE    "pque"
 #define CMD_PPV     "++v"
 #define CMD_MMV     "--v"
 #define CMD_MAX_LEN 4
@@ -46,6 +47,7 @@ const char* SERVER_UI_WELCOME = "Welcome to the MRMP server interface!";
 const char* SERVER_UI_HELP =    "Below are a list of available commands:\n"
                                 "\tstat : Display the # of total and active\n" 
                                 "\t       connections and sessions.\n"
+                                "\tpque : Display the # of clients waiting in the player queue.\n"
                                 "\thelp : Display this very same help message.\n"
                                 "\t++v  : Enable verbosity.\n"
                                 "\t--v  : Disable verbosity.\n"
@@ -54,6 +56,7 @@ const char* SERVER_UI_HELP =    "Below are a list of available commands:\n"
 //for client connection/ready player tracking purposes.
 static player_queue_t* player_queue = NULL;
 static SOCKET listen_socket = INVALID_SOCKET;
+static SOCKET accepted_sockets[MAX_CLIENT_CONNECTIONS]; //for global graceful disconnection handling.
 static HANDLE session_threads[MAX_SESSION_THREADS];
 
 //stores the next available cell in the client_sockets array to store an accepted client connection.
@@ -70,8 +73,13 @@ static int verbose = FALSE;
 static volatile int quit = FALSE;
 static HANDLE server_ui_thread;
 static HANDLE create_sessions_thread;
-static HANDLE player_queue_critsec;
-static HANDLE server_state_critsec;
+static CRITICAL_SECTION player_queue_critsec;
+static CRITICAL_SECTION server_state_critsec;
+
+static struct timeval DEFAULT_TIMEOUT = {
+    .tv_sec = DEFAULT_TIMEOUT_SECONDS,
+    .tv_usec = 0
+};
 
 //functions
 void cleanup(void);
@@ -85,8 +93,8 @@ int main(void) {
     //register functions to be called at exit().
     atexit(cleanup);
 
-    // InitializeCriticalSection(&player_queue_critsec);
-    // InitializeCriticalSection(&server_state_critsec);
+    InitializeCriticalSection(&player_queue_critsec);
+    InitializeCriticalSection(&server_state_critsec);
 
     //start up minimal user interface thread.
     server_ui_thread = (HANDLE)_beginthreadex(NULL, 0, &server_ui, NULL, 0, NULL);
@@ -180,16 +188,17 @@ int main(void) {
             continue;
         }
 
+        //THIS CODE MAKES A SOCKET STALE, UNUSABLE.
         //set a timeout value for future recv operations.
-        DWORD timeout = DEFAULT_TIMEOUT_SECONDS * 1000;
-        int setsockopt_result = setsockopt(*client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*) &timeout, sizeof(timeout));
-        if(setsockopt_result == SOCKET_ERROR) {
-            fprintf(stderr, "setsockopt failed with %u\n", WSAGetLastError());
-            send_error_pkt(*client_socket, MRMP_ERR_UNKNOWN);
-            shutdown(*client_socket, SD_SEND);
-            closesocket(*client_socket);
-            free(client_socket);
-        }
+        // DWORD timeout = DEFAULT_TIMEOUT_SECONDS * 1000;
+        // int setsockopt_result = setsockopt(*client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*) &timeout, sizeof(timeout));
+        // if(setsockopt_result == SOCKET_ERROR) {
+        //     fprintf(stderr, "setsockopt failed with %u\n", WSAGetLastError());
+        //     send_error_pkt(*client_socket, MRMP_ERR_UNKNOWN);
+        //     shutdown(*client_socket, SD_SEND);
+        //     closesocket(*client_socket);
+        //     free(client_socket);
+        // }
 
         //create a new thread to house client connection.
         HANDLE limbo_thread = (HANDLE)_beginthreadex(NULL, 0, &client_limbo, client_socket, 0, NULL);
@@ -211,12 +220,12 @@ void cleanup(void) {
     closesocket(listen_socket);
     WSACleanup();
 
-    //TODO: make sure this is the right way to clean up a critical section.
-    //DeleteCriticalSection(cr)
-
-
     WaitForSingleObject(create_sessions_thread, INFINITE);
     CloseHandle(create_sessions_thread);
+
+    //TODO: make sure this is the right way to clean up a critical section.
+    DeleteCriticalSection(&player_queue_critsec);
+    DeleteCriticalSection(&server_state_critsec);
 
     player_queue_free(player_queue);
 
@@ -245,6 +254,8 @@ unsigned __stdcall server_ui(void* data) {
             break;
         } else if(strncmp(cmd_buffer, CMD_STAT, 4) == 0) {
 
+        } else if(strncmp(cmd_buffer, CMD_PQUE, 4) == 0) {
+            printf("%d clients currently waiting in the player queue\n", player_queue_size(player_queue));
         } else if(strncmp(cmd_buffer, CMD_HELP, 4) == 0) {
             printf("%s", SERVER_UI_HELP);
         } else if(strncmp(cmd_buffer, CMD_PPV, 3) == 0) {
@@ -282,7 +293,7 @@ unsigned __stdcall client_limbo(void* client_socket) {
     //try to receive a hello packet, if it's not received correctly or in time, send an error packet 
     //and or shutdown and close the socket.
     mrmp_pkt_hello_t* hello_msg = NULL;
-    int hello_result = receive_mrmp_msg(socket, (void**) &hello_msg);
+    int hello_result = receive_mrmp_msg(socket, (char**) &hello_msg, &DEFAULT_TIMEOUT);
     
     switch(hello_result) {
         case GRACEFUL_DC:
@@ -305,11 +316,11 @@ unsigned __stdcall client_limbo(void* client_socket) {
             break;
     };
 
-    if(hello_msg->header.opcode != MRMP_OPCODE_HELLO) {
+    if(!exit_flag && hello_msg->header.opcode != MRMP_OPCODE_HELLO) {
         send_error_pkt(socket, MRMP_ERR_ILLEGAL_OPCODE);
         shutdown(socket, SD_SEND);
         exit_flag = TRUE;
-    } else if(hello_msg->version != MRMP_VERSION) {
+    } else if(!exit_flag && hello_msg->version != MRMP_VERSION) {
         if(verbose == TRUE)
             printf("Recieved hello packet, version %d\n", hello_msg->version);
         send_error_pkt(socket, MRMP_ERR_VERSION_MISMATCH);
@@ -332,11 +343,12 @@ unsigned __stdcall client_limbo(void* client_socket) {
 
     //exact same code but for the ready packet. TODO: find a better less repetitive way to handle this?
     mrmp_pkt_header_t* join_msg = NULL;
-    int join_result = receive_mrmp_msg(socket, (void**) &join_msg);
+    int join_result = receive_mrmp_msg(socket, (char**) &join_msg, &DEFAULT_TIMEOUT);
 
     switch(join_result) {
         case GRACEFUL_DC:
             send_error_pkt(socket, MRMP_ERR_UNKNOWN); //TODO: do we need this?
+            fprintf(stderr, "sent unknown error packet.\n");
             shutdown(socket, SD_SEND);
             exit_flag = TRUE;
             break;
@@ -345,6 +357,7 @@ unsigned __stdcall client_limbo(void* client_socket) {
             break;
         case TIMEDOUT:
             send_timeout_pkt(socket);
+            fprintf(stderr, "sent timeout packet.\n");
             shutdown(socket, SD_SEND);
             exit_flag = TRUE;
             break;
@@ -352,8 +365,9 @@ unsigned __stdcall client_limbo(void* client_socket) {
             break;
     };
 
-    if(join_msg->opcode != MRMP_OPCODE_JOIN) {
+    if(!exit_flag && join_msg->opcode != MRMP_OPCODE_JOIN) {
         send_error_pkt(socket, MRMP_ERR_ILLEGAL_OPCODE);
+        fprintf(stderr, "sent illegal opcode error packet due to received opcode %d\n", join_msg->opcode);
         shutdown(socket, SD_SEND);
         exit_flag = TRUE;
     }
@@ -368,9 +382,9 @@ unsigned __stdcall client_limbo(void* client_socket) {
     free(join_msg);
 
     //successful join request, add them to the player queue and end this thread.
-    // EnterCriticalSection(&player_queue_critsec);
-    // player_queue_push(player_queue, &socket);
-    // LeaveCriticalSection(&player_queue_critsec);
+    EnterCriticalSection(&player_queue_critsec);
+    player_queue_push(player_queue, socket);
+    LeaveCriticalSection(&player_queue_critsec);
 
     shutdown(socket, SD_SEND);
     closesocket(socket);
