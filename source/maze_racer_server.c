@@ -188,7 +188,7 @@ int main(void) {
             continue;
         }
 
-        //THIS CODE MAKES A SOCKET STALE, UNUSABLE.
+        //THIS CODE MAKES A SOCKET STALE ON TIMEOUT, UNUSABLE. USING SELECT FROM NOW ON.
         //set a timeout value for future recv operations.
         // DWORD timeout = DEFAULT_TIMEOUT_SECONDS * 1000;
         // int setsockopt_result = setsockopt(*client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*) &timeout, sizeof(timeout));
@@ -253,7 +253,12 @@ unsigned __stdcall server_ui(void* data) {
             printf("Server process is exiting...\n");
             break;
         } else if(strncmp(cmd_buffer, CMD_STAT, 4) == 0) {
-
+            printf(
+                "Total connections since startup    : %d\n"
+                "Active connections                 : %d\n\n"
+                "Total sessions since startup       : %d\n"
+                "Active sessions                    : %d\n",
+            total_connections, active_connections, total_sessions, active_sessions);
         } else if(strncmp(cmd_buffer, CMD_PQUE, 4) == 0) {
             printf("%d clients currently waiting in the player queue\n", player_queue_size(player_queue));
         } else if(strncmp(cmd_buffer, CMD_HELP, 4) == 0) {
@@ -382,16 +387,9 @@ unsigned __stdcall client_limbo(void* client_socket) {
     free(join_msg);
 
     //successful join request, add them to the player queue and end this thread.
-    // EnterCriticalSection(&player_queue_critsec);
-    // player_queue_push(player_queue, socket);
-    // LeaveCriticalSection(&player_queue_critsec);
-
-    maze_t* maze = generate_maze(8, 8);
-    send_join_resp_pkt(socket, maze);
-    free(maze);
-
-    shutdown(socket, SD_SEND);
-    closesocket(socket);
+    EnterCriticalSection(&player_queue_critsec);
+    player_queue_push(player_queue, socket);
+    LeaveCriticalSection(&player_queue_critsec);
 
     free(client_socket);
     _endthreadex(0);
@@ -399,32 +397,58 @@ unsigned __stdcall client_limbo(void* client_socket) {
 }
 
 unsigned __stdcall do_session(void* session_state) {
-    session_t* session = session_state;
+    session_t* session = (session_t*) session_state;
+    int stop_session = FALSE;
+
+    while(stop_session != TRUE) {
+
+    }
+
+    shutdown(session->player_one, SD_SEND);
+    closesocket(session->player_one);
+    shutdown(session->player_two, SD_SEND);
+    closesocket(session->player_two);
+
+    free(session);
 
     _endthreadex(0);
     return 0;
 }
 
 unsigned __stdcall create_sessions(void* data) {
-    //TODO: look into windows condition variables.
+    //TODO: look into windows condition variables to conditionally enter critical sections here.
     while(quit != TRUE) {
-        // EnterCriticalSection(&player_queue_critsec);
-        // //check if there is at least 2 players waiting in queue.
-        // //TODO: does reading active_sessions need to be locked?
-        // while(player_queue_size(player_queue) >= 2 && active_sessions <= MAX_SESSION_THREADS) {
-        //     //check validity of player sockets.
-        //     SOCKET* player_one_sock = malloc(sizeof(SOCKET));
-        //     SOCKET* player_two_sock = malloc(sizeof(SOCKET));
+        EnterCriticalSection(&player_queue_critsec);
+        //check if there is at least 2 players waiting in queue.
+        //TODO: does reading active_sessions need to be locked?
+        while(player_queue_size(player_queue) >= 2 && active_sessions <= MAX_SESSION_THREADS) {
+            SOCKET player_one_sock = *player_queue_front(player_queue);
+            player_queue_pop(player_queue);
+            SOCKET player_two_sock = *player_queue_front(player_queue);
+            player_queue_pop(player_queue);
 
-        //     *player_one_sock = *player_queue_front(player_queue);
-        //     player_queue_pop(player_queue);
-        //     *player_two_sock = *player_queue_front(player_queue);
-        //     player_queue_pop(player_queue);
-        // }
+            //initialize the session's state. ownership of this pointer is passed onto the session thread that will be made.
+            session_t* session = malloc(sizeof(session_t));
+            session->player_one = player_one_sock;
+            session->player_two = player_two_sock;
+            session->player_one_row = session->player_one_column = session->player_two_row = session->player_two_column = 0;
 
-        // LeaveCriticalSection(&player_queue_critsec);
+            //spin up a thread to host the session for the 2 sockets.
+            HANDLE session_thread = (HANDLE)_beginthreadex(NULL, 0, do_session, (void*) session, 0, NULL);
+            if(session_thread == NULL) {
+                fprintf(stderr, "failed to startup a session thread\n");
+                free(session_thread);
+                
+                //push sockets back into player queue.
+                player_queue_push(player_queue, player_one_sock);
+                player_queue_push(player_queue, player_two_sock);
+
+                continue;
+            }
+        }
+
+        LeaveCriticalSection(&player_queue_critsec);
     }
-
 
     _endthreadex(0);
     return 0;

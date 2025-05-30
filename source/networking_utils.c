@@ -220,7 +220,7 @@ int send_join_resp_pkt(SOCKET socket, maze_t* maze) {
 
     //copy maze cells.
     for(maze_size_t row = 0; row < maze->rows; ++row) {
-        memcpy(buffer + field_address, &maze->cells[row], sizeof(maze_cell_t) * maze->columns);
+        memcpy(buffer + field_address, maze->cells[row], sizeof(maze_cell_t) * maze->columns);
         field_address += sizeof(maze_cell_t) * maze->columns;
     }
 
@@ -263,13 +263,11 @@ int send_timeout_pkt(SOCKET socket) {
 
 maze_t* maze_network_to_host(mrmp_pkt_join_resp_t* msg) {
     if(msg == NULL) {
-        printf("mntoh returned null\n");
+        fprintf(stderr, "mntoh returned null\n");
         return NULL;
     }
     maze_t* maze = malloc(sizeof(maze_t));
     maze->cells = malloc(sizeof(maze_cell_t*) * msg->rows);
-
-    printf("mntoh rows: %d\n", msg->rows);
 
     maze->rows = msg->rows;
     maze->columns = msg->columns;
@@ -283,6 +281,7 @@ maze_t* maze_network_to_host(mrmp_pkt_join_resp_t* msg) {
     for(maze_size_t row = 0; row < maze->rows; ++row) {
         for(maze_size_t column = 0; column < maze->columns; ++column) {
             maze->cells[row][column] = msg->cells[i];
+            ++i;
         }
     }
 
