@@ -116,7 +116,7 @@ typedef struct session {
     uint8_t player_two_column;
 } session_t;
 
-int send_buffer(SOCKET socket, char* buffer, size_t buffer_length);
+int send_buffer(SOCKET socket, const char* buffer, int buffer_length);
 char* buffer_to_mrmp_pkt_struct(char* buffer);
 
 int send_error_pkt(SOCKET socket, mrmp_error_t error);
@@ -129,6 +129,8 @@ int send_move_pkt(SOCKET socket, maze_size_t row, maze_size_t column);
 int send_opponent_move_pkt(SOCKET socket, maze_size_t row, maze_size_t column);
 int send_bad_move_pkt(SOCKET socket, maze_size_t last_row, maze_size_t last_column);
 int send_timeout_pkt(SOCKET socket);
+
+maze_t* maze_network_to_host(mrmp_pkt_join_resp_t* msg);
 
 int process_error_pkt();
 int process_hello_pkt();

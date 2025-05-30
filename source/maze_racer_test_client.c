@@ -76,13 +76,12 @@ int main(int argc, char* argv[]) {
     receive_mrmp_msg(connect_socket, &msg, NULL);
     if(((mrmp_pkt_header_t*) msg)->opcode == MRMP_OPCODE_HELLO_ACK) {
         printf("Received hello acknowledgement packet!\n");
-        printf("%d\n", ((mrmp_pkt_header_t*) msg)->length);
         free(msg);
     } else {
         //printf("Did NOT receive hello acknowledgement packet :(\n");
     }
 
-    // send_join_pkt(connect_socket);
+    send_join_pkt(connect_socket);
 
     // receive_mrmp_msg(connect_socket, &msg, NULL);
     // if(((mrmp_pkt_error_t*) msg)->header.opcode == MRMP_OPCODE_ERROR) {
@@ -92,9 +91,22 @@ int main(int argc, char* argv[]) {
     //     //printf("Did NOT receive hello acknowledgement packet :(\n");
     // }
 
+    receive_mrmp_msg(connect_socket, &msg, NULL);
+    if(((mrmp_pkt_join_resp_t*) msg)->header.opcode == MRMP_OPCODE_JOIN_RESP) {
+        printf("Received join response + maze packet!\n");
+        free(msg);
+    } else {
+        //printf("Did NOT receive hello acknowledgement packet :(\n");
+    }
+
+    maze_t* maze = maze_network_to_host((mrmp_pkt_join_resp_t*) msg);
+    print_maze(maze);
+    free_maze(maze);
+
     Sleep(5 * 1000);
 
     closesocket(connect_socket);
 
+    printf("exiting test client\n");
     return EXIT_SUCCESS;
 }

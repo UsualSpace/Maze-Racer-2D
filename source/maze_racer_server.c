@@ -382,9 +382,13 @@ unsigned __stdcall client_limbo(void* client_socket) {
     free(join_msg);
 
     //successful join request, add them to the player queue and end this thread.
-    EnterCriticalSection(&player_queue_critsec);
-    player_queue_push(player_queue, socket);
-    LeaveCriticalSection(&player_queue_critsec);
+    // EnterCriticalSection(&player_queue_critsec);
+    // player_queue_push(player_queue, socket);
+    // LeaveCriticalSection(&player_queue_critsec);
+
+    maze_t* maze = generate_maze(8, 8);
+    send_join_resp_pkt(socket, maze);
+    free(maze);
 
     shutdown(socket, SD_SEND);
     closesocket(socket);
