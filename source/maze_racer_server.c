@@ -32,6 +32,7 @@
 #define MAX_SESSION_THREADS         10
 #define MAX_CLIENT_CONNECTIONS      (MAX_SESSION_THREADS * 2)
 #define DEFAULT_TIMEOUT_SECONDS     1
+#define ACTIVITY_TIMEOUT_SECONDS    20
 #define MRMP_VERSION                0
 
 #define CMD_EXIT    "exit"
@@ -57,7 +58,14 @@ const char* SERVER_UI_HELP =    "Below are a list of available commands:\n"
 static player_queue_t* player_queue = NULL;
 static SOCKET listen_socket = INVALID_SOCKET;
 static SOCKET accepted_sockets[MAX_CLIENT_CONNECTIONS]; //for global graceful disconnection handling.
-static HANDLE session_threads[MAX_SESSION_THREADS];
+
+//for cleanup purposes.
+typedef struct thread_tracker {
+    HANDLE thread_handle;
+    int is_active;
+} thread_tracker_t;
+
+static thread_tracker_t session_thread_tracker[MAX_SESSION_THREADS];
 
 //stores the next available cell in the client_sockets array to store an accepted client connection.
 static int next_thread_idx = 0;
@@ -81,7 +89,13 @@ static struct timeval DEFAULT_TIMEOUT = {
     .tv_usec = 0
 };
 
+static struct timeval ACTIVITY_TIMEOUT = {
+    .tv_sec = ACTIVITY_TIMEOUT_SECONDS,
+    .tv_usec = 0
+};
+
 //functions
+void init_session_thread_tracker(void);
 void cleanup(void);
 
 unsigned __stdcall server_ui(void* data);
@@ -214,6 +228,13 @@ int main(void) {
     }
 
     return EXIT_SUCCESS;
+}
+
+void init_session_thread_tracker(void) {
+    for(size_t i = 0; i < MAX_SESSION_THREADS; ++i) {
+        session_thread_tracker[i].thread_handle = NULL;
+        session_thread_tracker[i].is_active = FALSE;   
+    }
 }
 
 void cleanup(void) {
@@ -396,20 +417,138 @@ unsigned __stdcall client_limbo(void* client_socket) {
     return 0;
 }
 
+//TODO: more error handling on send functions.
 unsigned __stdcall do_session(void* session_state) {
     session_t* session = (session_t*) session_state;
     int stop_session = FALSE;
 
-    while(stop_session != TRUE) {
+    //generate a maze for the session. 
+    maze_size_t rows = 10;
+    maze_size_t columns = 10; 
+    maze_t* maze = generate_maze(rows, columns);
+    maze_size_t winning_row = rows - 1;
+    maze_size_t winning_column = columns - 1;
 
+    //respond to both connected clients previously sent JOIN packets.
+    send_join_resp_pkt(session->player_one, maze);
+    send_join_resp_pkt(session->player_two, maze);
+
+    //wait for ready packets.
+    char* msg = NULL;
+    int p1_receive_result = receive_mrmp_msg(session->player_one, &msg, &DEFAULT_TIMEOUT);
+    if(p1_receive_result != SUCCESS) {
+        if(p1_receive_result == TIMEDOUT) send_timeout_pkt(session->player_one);
+        free(msg);
+        cleanup_bad_session(session, maze, session->player_two, MRMP_ERR_UNKNOWN);
     }
 
+    free(msg);
+
+    int p2_receive_result = receive_mrmp_msg(session->player_two, &msg, &DEFAULT_TIMEOUT);
+    if(p2_receive_result != SUCCESS) {
+        if(p2_receive_result == TIMEDOUT) send_timeout_pkt(session->player_two);
+        free(msg);
+        cleanup_bad_session(session, maze, session->player_one, MRMP_ERR_UNKNOWN);
+    }
+
+    free(msg);
+
+    //at this point, both clients have verified they are ready to start the race, so send a start packet to both.
+    //I assume that there won't be too much delay between sequential sends.
+    //TODO: would randomized send order make it slightly more fair?
+    send_start_pkt(session->player_one);
+    send_start_pkt(session->player_two);
+
+    //start the session loop, wait for move or leave messages, any other message is considered illegal at this point in time.
+    while(stop_session != TRUE) {
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(session->player_one, &read_fds);
+        FD_SET(session->player_two, &read_fds);
+
+        // Wait for socket to become readable.
+        int select_result = select(0, &read_fds, NULL, NULL, &ACTIVITY_TIMEOUT);
+        if(select_result == 0) {
+            send_timeout_pkt(session->player_one);
+            send_timeout_pkt(session->player_two);
+            fprintf(stderr, "a session is timing out due to player inactivity\n.");
+            stop_session = TRUE;
+        } else if(select_result == SOCKET_ERROR) {
+            fprintf(stderr, "a session is timing out due to a socket connection error.\n.");
+            stop_session = TRUE;
+        } else {
+            for(u_int i = 0; i < read_fds.fd_count; ++i) {
+                SOCKET socket = read_fds.fd_array[i];
+                maze_size_t* row_ptr = NULL;
+                maze_size_t* column_ptr = NULL;
+
+                if(socket == session->player_one) {
+                    row_ptr = &session->player_one_row;
+                    column_ptr = &session->player_one_column; 
+                } else if(socket == session->player_two) {
+                    row_ptr = &session->player_two_row;
+                    column_ptr = &session->player_two_column; 
+                }
+
+                if(FD_ISSET(socket, &read_fds)) {
+                    //read in message and interpret.
+                    int receive_result = receive_mrmp_msg(socket, &msg, NULL);
+                    if(receive_result != SUCCESS && receive_result != TIMEDOUT) {
+                        stop_session = TRUE;
+                    }
+                    if(msg != NULL) {
+                        switch(PHEADER(msg)->opcode) {
+                            case MRMP_OPCODE_MOVE:
+                                if(maze_is_move_valid(maze, *row_ptr, *column_ptr, PMOVE(msg)->row, PMOVE(msg)->column) == FALSE) {
+                                    send_bad_move_pkt(socket, *row_ptr, *column_ptr);
+                                    free(msg);
+                                    msg = NULL;
+                                    continue;
+                                }
+                
+                                //move was valid, update session state to reflect successful move, then notify other player socket to update
+                                //their perspective of the current player socket's position in the maze.
+                                *row_ptr = PMOVE(msg)->row;
+                                *column_ptr = PMOVE(msg)->column;
+
+                                send_opponent_move_pkt(socket_complement(socket, session), *row_ptr, *column_ptr);
+
+                                if(*row_ptr == winning_row && *column_ptr == winning_column) {
+                                    send_result_pkt(socket, 1);
+                                    send_result_pkt(socket_complement(socket, session), 0);
+                                    stop_session = TRUE;
+                                    break;
+                                }
+                                break;
+                            case MRMP_OPCODE_LEAVE:
+                                //notify other socket of current sockets desire to leave, give an unknown error due to unknown leave reason.
+                                send_error_pkt(socket_complement(socket, session), MRMP_ERR_UNKNOWN);
+                                stop_session = TRUE;
+                                break;
+                            default:
+                                //illegal opcode received.
+                                send_error_pkt(socket, MRMP_ERR_ILLEGAL_OPCODE);
+                                stop_session = TRUE;
+                                break;
+                        };
+
+                        free(msg);
+                        msg = NULL;
+                    }
+                }
+            }
+        }
+    }
+
+    //TODO: wait for another JOIN packet if the client wants to play again.
     shutdown(session->player_one, SD_SEND);
     closesocket(session->player_one);
     shutdown(session->player_two, SD_SEND);
     closesocket(session->player_two);
 
+    free(msg);
     free(session);
+    free_maze(maze);
 
     _endthreadex(0);
     return 0;

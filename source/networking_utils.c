@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <process.h>
 
 #include "networking_utils.h"
 
@@ -44,6 +45,7 @@ char* buffer_to_mrmp_pkt_struct(char* buffer) {
     switch(header.opcode) {
         case MRMP_OPCODE_HELLO_ACK:
         case MRMP_OPCODE_JOIN:
+        case MRMP_OPCODE_START:
         case MRMP_OPCODE_LEAVE:
         case MRMP_OPCODE_TIMEOUT:
             pkt = malloc(sizeof(mrmp_pkt_header_t));
@@ -57,15 +59,15 @@ char* buffer_to_mrmp_pkt_struct(char* buffer) {
         case MRMP_OPCODE_HELLO:
             pkt = malloc(sizeof(mrmp_pkt_hello_t));
             memcpy(pkt, &header, sizeof(mrmp_pkt_header_t));
-            memcpy(&((mrmp_pkt_hello_t*)pkt)->version, buffer + MRMP_PKT_HEADER_SIZE, sizeof(mrmp_version_t));
+            memcpy(&PHELLO(pkt)->version, buffer + MRMP_PKT_HEADER_SIZE, sizeof(mrmp_version_t));
             break;
         case MRMP_OPCODE_MOVE:
         case MRMP_OPCODE_BAD_MOVE:
         case MRMP_OPCODE_OPPONENT_MOVE:
             pkt = malloc(sizeof(mrmp_pkt_move_t));
             memcpy(pkt, &header, sizeof(mrmp_pkt_header_t));
-            memcpy(&((mrmp_pkt_move_t*)pkt)->row, buffer + MRMP_PKT_HEADER_SIZE, sizeof(maze_size_t));
-            memcpy(&((mrmp_pkt_move_t*)pkt)->column, buffer + MRMP_PKT_HEADER_SIZE + sizeof(maze_size_t), sizeof(maze_size_t));
+            memcpy(&PMOVE(pkt)->row, buffer + MRMP_PKT_HEADER_SIZE, sizeof(maze_size_t));
+            memcpy(&PMOVE(pkt)->column, buffer + MRMP_PKT_HEADER_SIZE + sizeof(maze_size_t), sizeof(maze_size_t));
             break;
         case MRMP_OPCODE_JOIN_RESP:
             {
@@ -74,9 +76,9 @@ char* buffer_to_mrmp_pkt_struct(char* buffer) {
                 memcpy(&columns, buffer + MRMP_PKT_HEADER_SIZE + sizeof(maze_size_t), sizeof(maze_size_t));
                 pkt = malloc(sizeof(mrmp_pkt_join_resp_t) + (rows * columns) * sizeof(maze_cell_t));
                 memcpy(pkt, &header, sizeof(mrmp_pkt_header_t));
-                memcpy(&((mrmp_pkt_join_resp_t*)pkt)->rows, buffer + MRMP_PKT_HEADER_SIZE, sizeof(maze_size_t));
-                memcpy(&((mrmp_pkt_join_resp_t*)pkt)->columns, buffer + MRMP_PKT_HEADER_SIZE + sizeof(maze_size_t), sizeof(maze_size_t));
-                memcpy(((mrmp_pkt_join_resp_t*)pkt)->cells, buffer + MRMP_PKT_HEADER_SIZE + sizeof(maze_size_t) * 2, (rows * columns) * sizeof(maze_cell_t));
+                memcpy(&PJOINRE(pkt)->rows, buffer + MRMP_PKT_HEADER_SIZE, sizeof(maze_size_t));
+                memcpy(&PJOINRE(pkt)->columns, buffer + MRMP_PKT_HEADER_SIZE + sizeof(maze_size_t), sizeof(maze_size_t));
+                memcpy(PJOINRE(pkt)->cells, buffer + MRMP_PKT_HEADER_SIZE + sizeof(maze_size_t) * 2, (rows * columns) * sizeof(maze_cell_t));
             }
             break;
         default:
@@ -235,10 +237,210 @@ int send_join_resp_pkt(SOCKET socket, maze_t* maze) {
     return send_buffer_result;
 }
 
-int send_leave_pkt(SOCKET socket);
-int send_move_pkt(SOCKET socket, maze_size_t row, maze_size_t column);
-int send_opponent_move_pkt(SOCKET socket, maze_size_t row, maze_size_t column);
-int send_bad_move_pkt(SOCKET socket, maze_size_t last_row, maze_size_t last_column);
+int send_ready_pkt(SOCKET socket) {
+    mrmp_pkt_header_t msg = {
+        .opcode = MRMP_OPCODE_READY,
+        .length = 0
+    };
+
+    int field_address = 0;
+ 
+    char* buffer = malloc(MRMP_PKT_HEADER_SIZE);
+    memcpy(buffer, &msg.opcode, sizeof(mrmp_opcode_t));
+    field_address += sizeof(mrmp_opcode_t);
+    memcpy(buffer + field_address, &msg.length, sizeof(mrmp_payload_size_t));
+
+    int send_buffer_result = send_buffer(socket, buffer, MRMP_PKT_HEADER_SIZE);
+
+    if(send_buffer_result == SOCKET_ERROR) {
+        fprintf(stderr, "failed to send ready packet.\n");
+    }
+
+    free(buffer);
+
+    return send_buffer_result;
+}
+
+int send_start_pkt(SOCKET socket) {
+    mrmp_pkt_header_t msg = {
+        .opcode = MRMP_OPCODE_START,
+        .length = 0
+    };
+
+    int field_address = 0;
+ 
+    char* buffer = malloc(MRMP_PKT_HEADER_SIZE);
+    memcpy(buffer, &msg.opcode, sizeof(mrmp_opcode_t));
+    field_address += sizeof(mrmp_opcode_t);
+    memcpy(buffer + field_address, &msg.length, sizeof(mrmp_payload_size_t));
+
+    int send_buffer_result = send_buffer(socket, buffer, MRMP_PKT_HEADER_SIZE);
+
+    if(send_buffer_result == SOCKET_ERROR) {
+        fprintf(stderr, "failed to send start packet.\n");
+    }
+
+    free(buffer);
+
+    return send_buffer_result;
+}
+
+int send_leave_pkt(SOCKET socket) {
+    mrmp_pkt_header_t msg = {
+        .opcode = MRMP_OPCODE_LEAVE,
+        .length = 0
+    };
+
+    int field_address = 0;
+ 
+    char* buffer = malloc(MRMP_PKT_HEADER_SIZE);
+    memcpy(buffer, &msg.opcode, sizeof(mrmp_opcode_t));
+    field_address += sizeof(mrmp_opcode_t);
+    memcpy(buffer + field_address, &msg.length, sizeof(mrmp_payload_size_t));
+
+    int send_buffer_result = send_buffer(socket, buffer, MRMP_PKT_HEADER_SIZE);
+
+    if(send_buffer_result == SOCKET_ERROR) {
+        fprintf(stderr, "failed to send leave packet.\n");
+    }
+
+    free(buffer);
+
+    return send_buffer_result;
+}
+
+int send_move_pkt(SOCKET socket, maze_size_t row, maze_size_t column) {
+    mrmp_pkt_move_t msg = {
+        {
+            .opcode = MRMP_OPCODE_MOVE,
+            .length = sizeof(maze_size_t) * 2
+        },
+        .row = row,
+        .column = column
+    };
+
+    msg.header.length = htonl(msg.header.length);
+
+    int field_address = 0;
+ 
+    char* buffer = malloc(MRMP_PKT_MOVE_SIZE);
+    memcpy(buffer, &msg.header.opcode, sizeof(mrmp_opcode_t));
+    field_address += sizeof(mrmp_opcode_t);
+    memcpy(buffer + field_address, &msg.header.length, sizeof(mrmp_payload_size_t));
+    field_address += sizeof(mrmp_payload_size_t);
+    memcpy(buffer + field_address, &msg.row, sizeof(maze_size_t));
+    field_address += sizeof(maze_size_t);
+    memcpy(buffer + field_address, &msg.column, sizeof(maze_size_t));
+
+    int send_buffer_result = send_buffer(socket, buffer, MRMP_PKT_MOVE_SIZE);
+
+    if(send_buffer_result == SOCKET_ERROR) {
+        fprintf(stderr, "failed to send move packet.\n");
+    }
+
+    free(buffer);
+
+    return send_buffer_result;
+}
+
+int send_opponent_move_pkt(SOCKET socket, maze_size_t row, maze_size_t column) {
+    mrmp_pkt_move_t msg = {
+        {
+            .opcode = MRMP_OPCODE_OPPONENT_MOVE,
+            .length = sizeof(maze_size_t) * 2
+        },
+        .row = row,
+        .column = column
+    };
+
+    msg.header.length = htonl(msg.header.length);
+
+    int field_address = 0;
+ 
+    char* buffer = malloc(MRMP_PKT_MOVE_SIZE);
+    memcpy(buffer, &msg.header.opcode, sizeof(mrmp_opcode_t));
+    field_address += sizeof(mrmp_opcode_t);
+    memcpy(buffer + field_address, &msg.header.length, sizeof(mrmp_payload_size_t));
+    field_address += sizeof(mrmp_payload_size_t);
+    memcpy(buffer + field_address, &msg.row, sizeof(maze_size_t));
+    field_address += sizeof(maze_size_t);
+    memcpy(buffer + field_address, &msg.column, sizeof(maze_size_t));
+
+    int send_buffer_result = send_buffer(socket, buffer, MRMP_PKT_MOVE_SIZE);
+
+    if(send_buffer_result == SOCKET_ERROR) {
+        fprintf(stderr, "failed to send opponent move packet.\n");
+    }
+
+    free(buffer);
+
+    return send_buffer_result;
+}
+
+int send_bad_move_pkt(SOCKET socket, maze_size_t last_row, maze_size_t last_column) {
+    mrmp_pkt_move_t msg = {
+        {
+            .opcode = MRMP_OPCODE_BAD_MOVE,
+            .length = sizeof(maze_size_t) * 2
+        },
+        .row = last_row,
+        .column = last_column
+    };
+
+    msg.header.length = htonl(msg.header.length);
+
+    int field_address = 0;
+ 
+    char* buffer = malloc(MRMP_PKT_MOVE_SIZE);
+    memcpy(buffer, &msg.header.opcode, sizeof(mrmp_opcode_t));
+    field_address += sizeof(mrmp_opcode_t);
+    memcpy(buffer + field_address, &msg.header.length, sizeof(mrmp_payload_size_t));
+    field_address += sizeof(mrmp_payload_size_t);
+    memcpy(buffer + field_address, &msg.row, sizeof(maze_size_t));
+    field_address += sizeof(maze_size_t);
+    memcpy(buffer + field_address, &msg.column, sizeof(maze_size_t));
+
+    int send_buffer_result = send_buffer(socket, buffer, MRMP_PKT_MOVE_SIZE);
+
+    if(send_buffer_result == SOCKET_ERROR) {
+        fprintf(stderr, "failed to send bad move packet.\n");
+    }
+
+    free(buffer);
+
+    return send_buffer_result;
+}
+
+int send_result_pkt(SOCKET socket, mrmp_winner_t winner) {
+    mrmp_pkt_result_t msg = {
+        {
+            .opcode = MRMP_OPCODE_RESULT,
+            .length = sizeof(mrmp_winner_t)
+        },
+        .winner = winner
+    };
+
+    msg.header.length = htonl(msg.header.length);
+
+    int field_address = 0;
+ 
+    char* buffer = malloc(MRMP_PKT_RESULT_SIZE);
+    memcpy(buffer, &msg.header.opcode, sizeof(mrmp_opcode_t));
+    field_address += sizeof(mrmp_opcode_t);
+    memcpy(buffer + field_address, &msg.header.length, sizeof(mrmp_payload_size_t));
+    field_address += sizeof(mrmp_payload_size_t);
+    memcpy(buffer + field_address, &msg.winner, sizeof(mrmp_winner_t));
+
+    int send_buffer_result = send_buffer(socket, buffer, MRMP_PKT_RESULT_SIZE);
+
+    if(send_buffer_result == SOCKET_ERROR) {
+        fprintf(stderr, "failed to send result packet.\n");
+    }
+
+    free(buffer);
+
+    return send_buffer_result;
+}
 
 int send_timeout_pkt(SOCKET socket) {
     mrmp_pkt_header_t msg = {
@@ -324,7 +526,8 @@ int receive_mrmp_msg(SOCKET socket, char** out_msg, struct timeval* timeout) {
             free(bytes);
             return DISGRACEFUL_DC;
         } else if(bytes_received == TIMEDOUT) {
-            fprintf(stderr, "failed to receive message header, other end timed out.\n");
+            if(!(timeout->tv_sec == 0 && timeout->tv_usec == 0))
+                fprintf(stderr, "failed to receive message header, other end timed out.\n");
             free(bytes);
             return TIMEDOUT;
         }
@@ -337,7 +540,7 @@ int receive_mrmp_msg(SOCKET socket, char** out_msg, struct timeval* timeout) {
     payload_length = ntohl(payload_length);
 
     //reset variables.
-    expected_bytes += payload_length; //((mrmp_pkt_header_t*)bytes)->length;
+    expected_bytes += payload_length;
 
     fprintf(stderr, "%d byte message received\n", payload_length);
 
@@ -356,8 +559,9 @@ int receive_mrmp_msg(SOCKET socket, char** out_msg, struct timeval* timeout) {
             fprintf(stderr, "failed to receive message payload, other end disconnected ungracefully.\n");
             free(bytes);
             return DISGRACEFUL_DC;
-        } else if(bytes_received == SOCKET_ERROR && WSAGetLastError() == WSAETIMEDOUT) {
-            fprintf(stderr, "failed to receive message payload, other end timed out.\n");
+        } else if(bytes_received == TIMEDOUT) {
+            if(!(timeout->tv_sec == 0 && timeout->tv_usec == 0))
+                fprintf(stderr, "failed to receive message payload, other end timed out.\n");
             free(bytes);
             return TIMEDOUT;
         }
@@ -370,6 +574,29 @@ int receive_mrmp_msg(SOCKET socket, char** out_msg, struct timeval* timeout) {
     free(bytes);
 
     return SUCCESS;
+}
+
+void cleanup_bad_session(session_t* session, maze_t* maze, SOCKET notify_socket, int notify_error) {
+    if (session->player_one != INVALID_SOCKET) {
+        shutdown(session->player_one, SD_SEND);
+        closesocket(session->player_one);
+    }
+    if (session->player_two != INVALID_SOCKET) {
+        shutdown(session->player_two, SD_SEND);
+        closesocket(session->player_two);
+    }
+    if (notify_socket != INVALID_SOCKET) {
+        send_error_pkt(notify_socket, notify_error);
+    }
+    free(session);
+    free_maze(maze);
+    _endthreadex(0);
+}
+
+SOCKET socket_complement(SOCKET socket, session_t* session) {
+    if(socket == session->player_one) return session->player_two;
+    else if(socket == session->player_two) return session->player_one;
+    return INVALID_SOCKET;
 }
 
 

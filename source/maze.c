@@ -206,3 +206,55 @@ void print_maze(maze_t* maze) {
 
     return;
 }
+
+void print_maze_and_players(maze_t* maze, maze_size_t player_one_row, maze_size_t player_one_column, maze_size_t player_two_row, maze_size_t player_two_column) {
+    size_t print_rows = 3 * maze->rows;
+    size_t print_columns = 3 * maze->columns;
+    //printf("%d, %d", maze->rows, maze->columns);
+    char wall_char = 'x';
+    char player_char = 'o';
+
+    //allocate space for the printed representation of the maze.
+    char** print_maze = malloc(sizeof(char*) * print_rows);
+    for(int row = 0; row < print_rows; ++row) {
+        print_maze[row] = malloc(print_columns);
+        memset(print_maze[row], wall_char, print_columns);
+    }
+
+    for(maze_size_t row = 1; row < print_rows; row += 3) {
+        for(maze_size_t column = 1; column < print_columns; column += 3) {
+            uint8_t directions[4] = { NORTH, SOUTH, EAST, WEST };
+            for(int i = 0; i < 4; ++i) {
+                if(maze_cell_check_wall(&maze->cells[(row - 1) / 3][(column - 1) / 3], directions[i]) == FALSE) {
+                    print_maze[row][column] = ' ';
+                    if(directions[i] == NORTH) {
+                        print_maze[row - 1][column] = ' ';
+                    } else if(directions[i] == SOUTH) {
+                        print_maze[row + 1][column] = ' ';
+                    } else if(directions[i] == EAST) {
+                        print_maze[row][column + 1] = ' ';
+                    } else if(directions[i] == WEST) {
+                        print_maze[row][column - 1] = ' ';
+                    }
+                }
+            }
+        }
+    }
+
+    print_maze[player_one_row * 3 + 1][player_one_column * 3 + 1] = player_char;
+    print_maze[player_two_row * 3 + 1][player_two_column * 3 + 1] = player_char;
+
+    for(size_t row = 0; row < print_rows; ++row) {
+        for(size_t column = 0; column < print_columns; ++column) 
+            printf("%c ", print_maze[row][column]);
+        printf("\n");
+    }
+
+
+    //free the space allocated.
+    for(int row = 0; row < print_rows; ++row)
+        free(print_maze[row]);
+    free(print_maze);
+
+    return;
+}

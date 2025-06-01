@@ -49,12 +49,19 @@ typedef uint8_t mrmp_version_t;
 typedef uint8_t mrmp_error_t;
 typedef uint8_t mrmp_winner_t;
 
+#define PHEADER(msg) ((mrmp_pkt_header_t*)(msg))
+#define PMOVE(msg)   ((mrmp_pkt_move_t*)(msg))
+#define PJOINRE(msg) ((mrmp_pkt_join_resp_t*)(msg))
+#define PRESULT(msg) ((mrmp_pkt_result_t*)(msg))
+#define PHELLO(msg)  ((mrmp_pkt_hello_t*)(msg))
+
 //manually maintain tightly packed sizes of structs due to struct padding throwing off sizes.
 #define MRMP_PKT_HEADER_SIZE (sizeof(mrmp_opcode_t) + sizeof(mrmp_payload_size_t))
 #define MRMP_PKT_ERROR_SIZE (MRMP_PKT_HEADER_SIZE + sizeof(mrmp_error_t))
 #define MRMP_PKT_HELLO_SIZE (MRMP_PKT_HEADER_SIZE + sizeof(mrmp_version_t))
-#define MRMP_PKT_JOIN_RESP_PARTIAL_SIZE (MRMP_HEADER_SIZE + sizeof(mrmp_size_t) * 2) //size of maze isnt known at compile time.
-#define MRMP_PKT_MOVE_SIZE (MRMP_PKT_HEADER_SIZE + sizeof(mrmp_size_t) * 2)
+#define MRMP_PKT_JOIN_RESP_PARTIAL_SIZE (MRMP_HEADER_SIZE + sizeof(maze_size_t) * 2) //size of maze isnt known at compile time.
+#define MRMP_PKT_MOVE_SIZE (MRMP_PKT_HEADER_SIZE + sizeof(maze_size_t) * 2)
+#define MRMP_PKT_RESULT_SIZE (MRMP_PKT_HEADER_SIZE + sizeof(mrmp_winner_t))
 
 #pragma pack(push, 1) //easy way out, less portable
  
@@ -105,7 +112,7 @@ typedef struct mrmp_pkt_move {
 typedef struct mrmp_pkt_result {
     mrmp_pkt_header_t header;
     mrmp_winner_t winner;
-} mrmp_pkt_bad_move_t; 
+} mrmp_pkt_result_t; 
 
 typedef struct session {
     SOCKET player_one;
@@ -124,10 +131,13 @@ int send_hello_pkt(SOCKET socket, mrmp_version_t version);
 int send_hello_ack_pkt(SOCKET socket);
 int send_join_pkt(SOCKET socket);
 int send_join_resp_pkt(SOCKET socket, maze_t* maze);
+int send_ready_pkt(SOCKET socket);
+int send_start_pkt(SOCKET socket);
 int send_leave_pkt(SOCKET socket);
 int send_move_pkt(SOCKET socket, maze_size_t row, maze_size_t column);
 int send_opponent_move_pkt(SOCKET socket, maze_size_t row, maze_size_t column);
 int send_bad_move_pkt(SOCKET socket, maze_size_t last_row, maze_size_t last_column);
+int send_result_pkt(SOCKET socket, mrmp_winner_t winner);
 int send_timeout_pkt(SOCKET socket);
 
 maze_t* maze_network_to_host(mrmp_pkt_join_resp_t* msg);
@@ -141,5 +151,7 @@ int process_bad_move_pkt(SOCKET socket, session_t* session);
 
 int recv_w_timeout(SOCKET socket, char* buffer, int length, int flags, struct timeval* timeout);
 int receive_mrmp_msg(SOCKET socket, char** out_msg, struct timeval* timeout);
+void cleanup_bad_session(session_t* session, maze_t* maze, SOCKET notify_socket, int notify_error);
+SOCKET socket_complement(SOCKET socket, session_t* session); //get the other players socket relative to the given socket.
 
 #endif //NETWORKING_UTILS_H

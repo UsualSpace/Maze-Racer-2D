@@ -72,4 +72,6 @@ int free_maze(maze_t* maze);
 
 void print_maze(maze_t* maze);
 
+void print_maze_and_players(maze_t* maze, maze_size_t player_one_row, maze_size_t player_one_column, maze_size_t player_two_row, maze_size_t player_two_column);
+
 #endif //MAZE_CELL_H
