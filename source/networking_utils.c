@@ -542,7 +542,7 @@ int receive_mrmp_msg(SOCKET socket, char** out_msg, struct timeval* timeout) {
     //reset variables.
     expected_bytes += payload_length;
 
-    fprintf(stderr, "%d byte message received\n", payload_length);
+    //fprintf(stderr, "%d byte message received\n", payload_length);
 
     //try to receive rest of message.
     bytes = realloc(bytes, expected_bytes);
@@ -569,7 +569,6 @@ int receive_mrmp_msg(SOCKET socket, char** out_msg, struct timeval* timeout) {
         total_bytes_received += bytes_received;
     }
 
-    printf("reached\n");
     *out_msg = buffer_to_mrmp_pkt_struct(bytes);
     free(bytes);
 

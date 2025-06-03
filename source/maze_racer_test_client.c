@@ -37,7 +37,7 @@ static struct timeval DONT_BLOCK = {
 
 void process_input(void);
 int changed_position(int is_p1);
-void draw_player(int old_row, int old_column, int row, int column, int maze_start_row, int maze_start_column);
+void draw_player(int old_row, int old_column, int row, int column, int maze_start_row, int maze_start_column, int is_p1);
 
 //assist in console rendering.
 COORD get_cursor_position();
@@ -115,6 +115,10 @@ int main(int argc, char* argv[]) {
 
     //wait for receival of the maze structure for rendering purposes.
     receive_mrmp_msg(connect_socket, &msg, NULL);
+
+    //TODO: figure out why printed maze origin in console starts printing here.
+    fflush(stdout);
+
     if(PHEADER(msg)->opcode == MRMP_OPCODE_JOIN_RESP) {
         printf("Received join response + maze packet!\n");
     }
@@ -123,14 +127,15 @@ int main(int argc, char* argv[]) {
     maze_t* maze = maze_network_to_host(PJOINRE(msg));
     free(msg);
 
-    //draw the maze and save the position of its top left corner on screen.
-    putchar('\n');
+    //clear screen, draw the maze and save the position of its top left corner on screen.
+    printf("\e[1;1H\e[2J");
+    fflush(stdout);
     COORD maze_origin = get_cursor_position();
     print_maze(maze);
 
     //send ready packet.
     send_ready_pkt(connect_socket);
-    printf("sent ready packet.\n");
+    fprintf(stderr, "sent ready packet.\n"); 
 
     //wait for start packet.
     int receive_start_result = receive_mrmp_msg(connect_socket, &msg, NULL);
@@ -139,7 +144,7 @@ int main(int argc, char* argv[]) {
     // }
 
     if(PHEADER(msg)->opcode == MRMP_OPCODE_START) {
-        printf("Received start notification! Beginning game loop.\n");
+       // printf("Received start notification! Beginning game loop.\n");
     }
 
     free(msg);
@@ -149,8 +154,8 @@ int main(int argc, char* argv[]) {
     int stop_game = FALSE;
 
     //render players.
-    draw_player(last_p1_row, last_p1_column, p1_row, p1_column, maze_origin.Y, maze_origin.X);
-    draw_player(last_p2_row, last_p2_column, p2_row, p2_column, maze_origin.Y, maze_origin.X);
+    draw_player(last_p1_row, last_p1_column, p1_row, p1_column, maze_origin.Y, maze_origin.X, 1);
+    draw_player(last_p2_row, last_p2_column, p2_row, p2_column, maze_origin.Y, maze_origin.X, 0);
 
     while(stop_game != TRUE) {
         //read incoming messages first and foremost.
@@ -171,10 +176,6 @@ int main(int argc, char* argv[]) {
                 case MRMP_OPCODE_OPPONENT_MOVE:
                     p2_row = PMOVE(msg)->row;
                     p2_column = PMOVE(msg)->column;
-                    if(changed_position(0) == TRUE) {
-                        last_p2_row = p2_row;
-                        last_p2_column = p2_column;
-                    }
                     break;
                 case MRMP_OPCODE_RESULT:
                     if(PRESULT(msg)->winner == 0) {
@@ -205,25 +206,22 @@ int main(int argc, char* argv[]) {
         msg = NULL;
 
         if(stop_game == TRUE) break;
+
+        process_input();
         
         //render players.
-        if(changed_position(1) == TRUE)
-            draw_player(last_p1_row, last_p1_column, p1_row, p1_column, maze_origin.Y, maze_origin.X);
-        
-        if(changed_position(0) == TRUE)
-            draw_player(last_p2_row, last_p2_column, p2_row, p2_column, maze_origin.Y, maze_origin.X);
-        
-        process_input();
+        if(changed_position(0) == TRUE) {
+            draw_player(last_p2_row, last_p2_column, p2_row, p2_column, maze_origin.Y, maze_origin.X, 0);
+            last_p2_row = p2_row;
+            last_p2_column = p2_column;
+        }
 
         if(changed_position(1) == TRUE) {
+            draw_player(last_p1_row, last_p1_column, p1_row, p1_column, maze_origin.Y, maze_origin.X, 1);
             send_move_pkt(connect_socket, p1_row, p1_column);
             last_p1_row = p1_row;
             last_p1_column = p1_column;
         }   
-        //printf("\e[1;1H\e[2J");
-        //printf("\e[H");
-        
-        Sleep(50);
     }
     
     shutdown(connect_socket, SD_SEND);
@@ -236,7 +234,8 @@ int main(int argc, char* argv[]) {
 
 void process_input(void) {
     int d;
-    if(kbhit()) d = _getche();
+    if(kbhit()) d = _getch();
+    Sleep(10);
     // int c;
     // while(c = getchar() != '\n' && c != EOF); //clear stdin.
 
@@ -266,15 +265,19 @@ int changed_position(int is_p1) {
     }
 }
 
-void draw_player(int old_row, int old_column, int row, int column, int maze_start_row, int maze_start_column) {
+void draw_player(int old_row, int old_column, int row, int column, int maze_start_row, int maze_start_column, int is_p1) {
+    fflush(stdout);
     COORD current_pos = get_cursor_position();
+    fflush(stdout);
     
     //remove old position
-    move_cursor((maze_start_column + old_column) * 3 + 1, (maze_start_row + old_row) * 3 + 1);
-    putchar(' ');
+    move_cursor((old_column * 6 + 2) + maze_start_column, (old_row * 3 + 1) + maze_start_row);
     
-    //draw in new position
-    move_cursor((maze_start_column + column) * 3 + 1, (maze_start_row + row) * 3 + 1);
+    if ((is_p1 && (old_row != p2_row || old_column != p2_column)) || (!is_p1 && (old_row != p1_row || old_column != p1_column)))
+        putchar(' ');
+    
+    //draw in new position (6 + 2) horizontally due to format of printed maze.
+    move_cursor((column * 6 + 2) + maze_start_column, (row * 3 + 1) + maze_start_row);
     putchar(PLAYER_CHAR);
 
     //move back to original position for further message printing.

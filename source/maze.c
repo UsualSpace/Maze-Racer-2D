@@ -56,10 +56,13 @@ int maze_cell_check_wall(maze_cell_t* cell, uint8_t direction) {
 int maze_is_move_valid(maze_t* maze, maze_size_t old_row, maze_size_t old_column, maze_size_t new_row, maze_size_t new_column) {
     //first check if difference between old and new cell coordinates is > 1
     if(abs(new_row - old_row) > 1) return FALSE;
-    if(abs(new_column - old_row) > 1) return FALSE;
+    if(abs(new_column - old_column) > 1) return FALSE;
 
     //check if move is adjacent vertically or horizontally, diagonals aren't allowed
-    if(new_row != old_row && new_column != old_column) return FALSE;
+    if(new_row != old_row && new_column != old_column) {
+        fprintf(stderr, "attempted diagonal move.\n");
+        return FALSE;
+    }
 
     //check for walls in the moved direction.
     uint8_t direction;
@@ -72,9 +75,14 @@ int maze_is_move_valid(maze_t* maze, maze_size_t old_row, maze_size_t old_column
         direction = WEST;
     } else if(new_column == old_column + 1) {
         direction = EAST;
+    } else {
+        return FALSE;
     }
 
-    if(maze_cell_check_wall(&maze->cells[old_row][old_column], direction) == TRUE) return FALSE;
+    if(maze_cell_check_wall(&maze->cells[old_row][old_column], direction) == TRUE) {
+        fprintf(stderr, "attempted to cross a wall.\n");
+        return FALSE;
+    }
 
     return TRUE;
 }

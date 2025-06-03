@@ -202,17 +202,15 @@ int main(void) {
             continue;
         }
 
-        //THIS CODE MAKES A SOCKET STALE ON TIMEOUT, UNUSABLE. USING SELECT FROM NOW ON.
-        //set a timeout value for future recv operations.
-        // DWORD timeout = DEFAULT_TIMEOUT_SECONDS * 1000;
-        // int setsockopt_result = setsockopt(*client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*) &timeout, sizeof(timeout));
-        // if(setsockopt_result == SOCKET_ERROR) {
-        //     fprintf(stderr, "setsockopt failed with %u\n", WSAGetLastError());
-        //     send_error_pkt(*client_socket, MRMP_ERR_UNKNOWN);
-        //     shutdown(*client_socket, SD_SEND);
-        //     closesocket(*client_socket);
-        //     free(client_socket);
-        // }
+        struct linger sl = {1, 2}; //wait max 2 seconds to send remaining data
+        int setsockopt_result = setsockopt(*client_socket, SOL_SOCKET, SO_LINGER, (char*)&sl, sizeof(sl));
+        if(setsockopt_result == SOCKET_ERROR) {
+            fprintf(stderr, "setsockopt failed with %u\n", WSAGetLastError());
+            send_error_pkt(*client_socket, MRMP_ERR_UNKNOWN);
+            shutdown(*client_socket, SD_SEND);
+            closesocket(*client_socket);
+            free(client_socket);
+        }
 
         //create a new thread to house client connection.
         HANDLE limbo_thread = (HANDLE)_beginthreadex(NULL, 0, &client_limbo, client_socket, 0, NULL);
@@ -423,8 +421,8 @@ unsigned __stdcall do_session(void* session_state) {
     int stop_session = FALSE;
 
     //generate a maze for the session. 
-    maze_size_t rows = 10;
-    maze_size_t columns = 10; 
+    maze_size_t rows = 3;
+    maze_size_t columns = 3; 
     maze_t* maze = generate_maze(rows, columns);
     maze_size_t winning_row = rows - 1;
     maze_size_t winning_column = columns - 1;
@@ -478,6 +476,10 @@ unsigned __stdcall do_session(void* session_state) {
             stop_session = TRUE;
         } else {
             for(u_int i = 0; i < read_fds.fd_count; ++i) {
+                if(stop_session == TRUE) {
+                    break;
+                }
+
                 SOCKET socket = read_fds.fd_array[i];
                 maze_size_t* row_ptr = NULL;
                 maze_size_t* column_ptr = NULL;
@@ -501,6 +503,7 @@ unsigned __stdcall do_session(void* session_state) {
                             case MRMP_OPCODE_MOVE:
                                 if(maze_is_move_valid(maze, *row_ptr, *column_ptr, PMOVE(msg)->row, PMOVE(msg)->column) == FALSE) {
                                     send_bad_move_pkt(socket, *row_ptr, *column_ptr);
+                                    fprintf(stderr, "sent bad move packet.\n");
                                     free(msg);
                                     msg = NULL;
                                     continue;
@@ -516,6 +519,7 @@ unsigned __stdcall do_session(void* session_state) {
                                 if(*row_ptr == winning_row && *column_ptr == winning_column) {
                                     send_result_pkt(socket, 1);
                                     send_result_pkt(socket_complement(socket, session), 0);
+                                    Sleep(200);
                                     stop_session = TRUE;
                                     break;
                                 }

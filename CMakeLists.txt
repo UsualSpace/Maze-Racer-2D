@@ -19,18 +19,6 @@ add_executable(MazeRacerServer ${CMAKE_CURRENT_SOURCE_DIR}/source/maze_racer_ser
 add_executable(MazeRacerTestClient ${CMAKE_CURRENT_SOURCE_DIR}/source/maze_racer_test_client.c ${LIBSRC})
 #add_executable(MazeRacerClient ${CMAKE_CURRENT_SOURCE_DIR}/source/maze_racer_client.c ${LIBSRC})
 
-set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-
-add_subdirectory(${CMAKE_SOURCE_DIR}/libraries/glfw)
-
-#target_link_libraries(MazeRacerClient glfw)
-
-find_package(OpenGL REQUIRED)
-
-#target_include_directories(MazeRacerClient PRIVATE ${CMAKE_SOURCE_DIR}/libraries/glad/include)
-#target_include_directories(MazeRacerClient PRIVATE ${CMAKE_SOURCE_DIR}/libraries/glfw/include)
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
 target_link_libraries(MazeRacerServer ws2_32)
