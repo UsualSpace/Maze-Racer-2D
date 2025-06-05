@@ -61,6 +61,11 @@ char* buffer_to_mrmp_pkt_struct(char* buffer) {
             memcpy(pkt, &header, sizeof(mrmp_pkt_header_t));
             memcpy(&PHELLO(pkt)->version, buffer + MRMP_PKT_HEADER_SIZE, sizeof(mrmp_version_t));
             break;
+        case MRMP_OPCODE_RESULT:
+            pkt = malloc(sizeof(mrmp_pkt_result_t));
+            memcpy(pkt, &header, sizeof(mrmp_pkt_header_t));
+            memcpy(&PRESULT(pkt)->winner, buffer + MRMP_PKT_HEADER_SIZE, sizeof(mrmp_winner_t));
+            break;
         case MRMP_OPCODE_MOVE:
         case MRMP_OPCODE_BAD_MOVE:
         case MRMP_OPCODE_OPPONENT_MOVE:
