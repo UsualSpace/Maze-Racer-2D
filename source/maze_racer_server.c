@@ -421,8 +421,8 @@ unsigned __stdcall do_session(void* session_state) {
     int stop_session = FALSE;
 
     //generate a maze for the session. 
-    maze_size_t rows = 3;
-    maze_size_t columns = 3; 
+    maze_size_t rows = 20;
+    maze_size_t columns = 20; 
     maze_t* maze = generate_maze(rows, columns);
     maze_size_t winning_row = rows - 1;
     maze_size_t winning_column = columns - 1;

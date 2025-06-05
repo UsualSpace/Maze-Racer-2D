@@ -61,7 +61,7 @@ int main(int argc, char* argv[]) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    int getaddrinfo_result = getaddrinfo(argv[1], MRMP_DEFAULT_PORT, &hints, &result);
+    int getaddrinfo_result = getaddrinfo(argv[1], argv[2], &hints, &result);
     if(getaddrinfo_result != 0) {
         fprintf(stderr, "getaddrinfo failed: %d\n", getaddrinfo_result);
         WSACleanup();
