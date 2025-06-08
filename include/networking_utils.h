@@ -63,7 +63,7 @@ typedef uint8_t mrmp_winner_t;
 #define MRMP_PKT_MOVE_SIZE (MRMP_PKT_HEADER_SIZE + sizeof(maze_size_t) * 2)
 #define MRMP_PKT_RESULT_SIZE (MRMP_PKT_HEADER_SIZE + sizeof(mrmp_winner_t))
 
-#pragma pack(push, 1) //easy way out, less portable
+//#pragma pack(push, 1) //easy way out, less portable
  
 //sufficient for join, leave, bad move packets.
 typedef struct mrmp_pkt_header {
@@ -94,7 +94,7 @@ typedef struct mrmp_pkt_move {
     maze_size_t column;
 } mrmp_pkt_move_t; 
 
-#pragma pack(pop) //easy way out, less portable
+//#pragma pack(pop) //easy way out, less portable
 
 //Can be replaced by mrmp_pkt_move with a different opcode.
 // typedef struct mrmp_pkt_bad_move {
