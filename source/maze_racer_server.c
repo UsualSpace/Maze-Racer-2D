@@ -57,18 +57,7 @@ const char* SERVER_UI_HELP =    "Below are a list of available commands:\n"
 //for client connection/ready player tracking purposes.
 static player_queue_t* player_queue = NULL;
 static SOCKET listen_socket = INVALID_SOCKET;
-static SOCKET accepted_sockets[MAX_CLIENT_CONNECTIONS]; //for global graceful disconnection handling.
-
-//for cleanup purposes.
-typedef struct thread_tracker {
-    HANDLE thread_handle;
-    int is_active;
-} thread_tracker_t;
-
-static thread_tracker_t session_thread_tracker[MAX_SESSION_THREADS];
-
-//stores the next available cell in the client_sockets array to store an accepted client connection.
-static int next_thread_idx = 0;
+static HANDLE session_thread_tracker[MAX_SESSION_THREADS];
 
 //for statistical/debug purposes.
 static int total_connections = 0;
@@ -84,6 +73,15 @@ static HANDLE create_sessions_thread;
 static CRITICAL_SECTION player_queue_critsec;
 static CRITICAL_SECTION server_state_critsec;
 
+typedef struct session {
+    SOCKET player_one;
+    SOCKET player_two;
+    uint8_t player_one_row;
+    uint8_t player_one_column;
+    uint8_t player_two_row;
+    uint8_t player_two_column;
+} session_t;
+
 static struct timeval DEFAULT_TIMEOUT = {
     .tv_sec = DEFAULT_TIMEOUT_SECONDS,
     .tv_usec = 0
@@ -95,7 +93,9 @@ static struct timeval ACTIVITY_TIMEOUT = {
 };
 
 //functions
+SOCKET socket_complement(SOCKET socket, session_t* session); //get the other players socket relative to the given socket.
 void init_session_thread_tracker(void);
+void cleanup_bad_session(session_t* session, maze_t* maze, SOCKET notify_socket, int notify_error);
 void cleanup(void);
 
 unsigned __stdcall server_ui(void* data);
@@ -106,6 +106,9 @@ unsigned __stdcall create_sessions(void* data);
 int main(void) {
     //register functions to be called at exit().
     atexit(cleanup);
+
+    //initialize the session thread tracker array.
+    init_session_thread_tracker();
 
     InitializeCriticalSection(&player_queue_critsec);
     InitializeCriticalSection(&server_state_critsec);
@@ -202,15 +205,21 @@ int main(void) {
             continue;
         }
 
-        struct linger sl = {1, 2}; //wait max 2 seconds to send remaining data
-        int setsockopt_result = setsockopt(*client_socket, SOL_SOCKET, SO_LINGER, (char*)&sl, sizeof(sl));
-        if(setsockopt_result == SOCKET_ERROR) {
-            fprintf(stderr, "setsockopt failed with %u\n", WSAGetLastError());
-            send_error_pkt(*client_socket, MRMP_ERR_UNKNOWN);
-            shutdown(*client_socket, SD_SEND);
-            closesocket(*client_socket);
-            free(client_socket);
-        }
+        //increment active connections
+        EnterCriticalSection(&server_state_critsec);
+        ++active_connections;
+        ++total_connections;
+        LeaveCriticalSection(&server_state_critsec);
+
+        // struct linger sl = {1, 2}; //wait max 2 seconds to send remaining data
+        // int setsockopt_result = setsockopt(*client_socket, SOL_SOCKET, SO_LINGER, (char*)&sl, sizeof(sl));
+        // if(setsockopt_result == SOCKET_ERROR) {
+        //     fprintf(stderr, "setsockopt failed with %u\n", WSAGetLastError());
+        //     send_error_pkt(*client_socket, MRMP_ERR_UNKNOWN);
+        //     shutdown(*client_socket, SD_SEND);
+        //     closesocket(*client_socket);
+        //     free(client_socket);
+        // }
 
         //create a new thread to house client connection.
         HANDLE limbo_thread = (HANDLE)_beginthreadex(NULL, 0, &client_limbo, client_socket, 0, NULL);
@@ -228,11 +237,44 @@ int main(void) {
     return EXIT_SUCCESS;
 }
 
+SOCKET socket_complement(SOCKET socket, session_t* session) {
+    if(socket == session->player_one) return session->player_two;
+    else if(socket == session->player_two) return session->player_one;
+    return INVALID_SOCKET;
+}
+
 void init_session_thread_tracker(void) {
     for(size_t i = 0; i < MAX_SESSION_THREADS; ++i) {
-        session_thread_tracker[i].thread_handle = NULL;
-        session_thread_tracker[i].is_active = FALSE;   
+        session_thread_tracker[i] = NULL;
     }
+}
+
+void cleanup_bad_session(session_t* session, maze_t* maze, SOCKET notify_socket, int notify_error) {
+    if (session->player_one != INVALID_SOCKET) {
+        shutdown(session->player_one, SD_SEND);
+        closesocket(session->player_one);
+        EnterCriticalSection(&server_state_critsec);
+        --active_connections;
+        LeaveCriticalSection(&server_state_critsec);
+    }
+    if (session->player_two != INVALID_SOCKET) {
+        shutdown(session->player_two, SD_SEND);
+        closesocket(session->player_two);
+        EnterCriticalSection(&server_state_critsec);
+        --active_connections;
+        LeaveCriticalSection(&server_state_critsec);
+    }
+    if (notify_socket != INVALID_SOCKET) {
+        send_error_pkt(notify_socket, notify_error);
+    }
+
+    EnterCriticalSection(&server_state_critsec);
+    --active_sessions;
+    LeaveCriticalSection(&server_state_critsec);
+
+    free(session);
+    free_maze(maze);
+    _endthreadex(0);
 }
 
 void cleanup(void) {
@@ -241,6 +283,8 @@ void cleanup(void) {
 
     WaitForSingleObject(create_sessions_thread, INFINITE);
     CloseHandle(create_sessions_thread);
+
+    WaitForMultipleObjects(MAX_SESSION_THREADS, session_thread_tracker, TRUE, INFINITE);
 
     //TODO: make sure this is the right way to clean up a critical section.
     DeleteCriticalSection(&player_queue_critsec);
@@ -355,9 +399,13 @@ unsigned __stdcall client_limbo(void* client_socket) {
 
     if(exit_flag == TRUE) {
         closesocket(socket);
+        EnterCriticalSection(&server_state_critsec);
+        --active_connections;
+        LeaveCriticalSection(&server_state_critsec);
         free(hello_msg);
         free(client_socket);
         _endthreadex(0);
+        
     }
 
     free(hello_msg);
@@ -398,6 +446,9 @@ unsigned __stdcall client_limbo(void* client_socket) {
 
     if(exit_flag == TRUE) {
         closesocket(socket);
+        EnterCriticalSection(&server_state_critsec);
+        --active_connections;
+        LeaveCriticalSection(&server_state_critsec);
         free(join_msg);
         free(client_socket);
         _endthreadex(0);
@@ -547,8 +598,19 @@ unsigned __stdcall do_session(void* session_state) {
     //TODO: wait for another JOIN packet if the client wants to play again.
     shutdown(session->player_one, SD_SEND);
     closesocket(session->player_one);
+    EnterCriticalSection(&server_state_critsec);
+    --active_connections;
+    LeaveCriticalSection(&server_state_critsec);
+
     shutdown(session->player_two, SD_SEND);
+    EnterCriticalSection(&server_state_critsec);
+    --active_connections;
+    LeaveCriticalSection(&server_state_critsec);
     closesocket(session->player_two);
+
+    EnterCriticalSection(&server_state_critsec);
+    --active_sessions;
+    LeaveCriticalSection(&server_state_critsec);
 
     free(msg);
     free(session);
@@ -564,7 +626,7 @@ unsigned __stdcall create_sessions(void* data) {
         EnterCriticalSection(&player_queue_critsec);
         //check if there is at least 2 players waiting in queue.
         //TODO: does reading active_sessions need to be locked?
-        while(player_queue_size(player_queue) >= 2 && active_sessions <= MAX_SESSION_THREADS) {
+        while(player_queue_size(player_queue) >= 2 && active_sessions < MAX_SESSION_THREADS) {
             SOCKET player_one_sock = *player_queue_front(player_queue);
             player_queue_pop(player_queue);
             SOCKET player_two_sock = *player_queue_front(player_queue);
@@ -576,11 +638,25 @@ unsigned __stdcall create_sessions(void* data) {
             session->player_two = player_two_sock;
             session->player_one_row = session->player_one_column = session->player_two_row = session->player_two_column = 0;
 
-            //spin up a thread to host the session for the 2 sockets.
-            HANDLE session_thread = (HANDLE)_beginthreadex(NULL, 0, do_session, (void*) session, 0, NULL);
-            if(session_thread == NULL) {
-                fprintf(stderr, "failed to startup a session thread\n");
-                free(session_thread);
+            //find next available cell to store the upcoming thread handle.
+            int next_session_idx = -1;
+            EnterCriticalSection(&server_state_critsec);
+            for(int i = 0; i < MAX_SESSION_THREADS; ++i) {
+                if(session_thread_tracker[i] == NULL) {
+                    next_session_idx = i;
+                } else {
+                    if(WaitForSingleObject(session_thread_tracker[i], 0) == WAIT_OBJECT_0) {
+                        CloseHandle(session_thread_tracker[i]);
+                        next_session_idx = i;
+                        break;
+                    }
+                }
+            }
+            LeaveCriticalSection(&server_state_critsec);
+
+            if(next_session_idx == -1) {
+                fprintf(stderr, "failed to startup a session thread, session threads at user defined capacity.\n");
+                free(session);
                 
                 //push sockets back into player queue.
                 player_queue_push(player_queue, player_one_sock);
@@ -588,6 +664,26 @@ unsigned __stdcall create_sessions(void* data) {
 
                 continue;
             }
+
+            //spin up a thread to host the session for the 2 sockets.
+            HANDLE session_thread = (HANDLE)_beginthreadex(NULL, 0, do_session, (void*) session, 0, NULL);
+            if(session_thread == NULL) {
+                fprintf(stderr, "failed to startup a session thread\n");
+                free(session);
+                
+                //push sockets back into player queue.
+                player_queue_push(player_queue, player_one_sock);
+                player_queue_push(player_queue, player_two_sock);
+
+                continue;
+            }
+
+            session_thread_tracker[next_session_idx] = session_thread;
+
+            EnterCriticalSection(&server_state_critsec);
+            ++active_sessions;
+            ++total_sessions;
+            LeaveCriticalSection(&server_state_critsec);
         }
 
         LeaveCriticalSection(&player_queue_critsec);

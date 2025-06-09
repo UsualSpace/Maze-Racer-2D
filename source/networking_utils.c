@@ -580,28 +580,5 @@ int receive_mrmp_msg(SOCKET socket, char** out_msg, struct timeval* timeout) {
     return SUCCESS;
 }
 
-void cleanup_bad_session(session_t* session, maze_t* maze, SOCKET notify_socket, int notify_error) {
-    if (session->player_one != INVALID_SOCKET) {
-        shutdown(session->player_one, SD_SEND);
-        closesocket(session->player_one);
-    }
-    if (session->player_two != INVALID_SOCKET) {
-        shutdown(session->player_two, SD_SEND);
-        closesocket(session->player_two);
-    }
-    if (notify_socket != INVALID_SOCKET) {
-        send_error_pkt(notify_socket, notify_error);
-    }
-    free(session);
-    free_maze(maze);
-    _endthreadex(0);
-}
-
-SOCKET socket_complement(SOCKET socket, session_t* session) {
-    if(socket == session->player_one) return session->player_two;
-    else if(socket == session->player_two) return session->player_one;
-    return INVALID_SOCKET;
-}
-
 
 
