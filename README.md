@@ -17,6 +17,3 @@ The keyboard controls are:
 * S - DOWN
 * D - RIGHT    
 
-## Extra
-Any arbitrary client program on an arbitrary machine can interact with the server and vice versa if they both abide by the RFC document for the game for their respective roles.
-
