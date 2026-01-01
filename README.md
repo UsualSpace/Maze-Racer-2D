@@ -11,7 +11,7 @@ After compiling, run the server process on a windows machine with ```./MazeRacer
 
 <img width="1659" height="393" alt="image" src="https://github.com/user-attachments/assets/cefc123b-fb7d-4e45-adfc-208d3e82e2bb" />
 
-*There are 3 terminals shown here. Left: The server's minimal user interface to check the status of things. Middle: One of the two paired clients playing a match. Right: The other of the two paired clients playing a match*
+*There are 3 terminals shown here. Left: The server's minimal user interface to check the status of things. Middle: One of two paired clients playing a match. Right: The other of the two paired clients playing a match*
 
 The keyboard controls are:
 * W - UP
