@@ -1,7 +1,16 @@
 # Maze-Racer-2D
 A small networked game serving as our final project for the CS494P Internetworking Protocols course at Portland State University, during the Spring 2025 quarter. An RFC style document that we had to prepare to define our networking protocol is included.
 
-## Setup (WIP description)
+## Setup
 This project can be compiled via CMake (see CMakeLists.txt). Make sure to set the appropriate CMake presets for your system (create and configure a CMakePresets.json). It was initially compiled and built using GCC as the compiler and Ninja as the build tool, though other tools will most likely work.
 
 This project uses windows api for sockets, multi-threading, and concurrency so it will only work on windows, but can pretty easily be adapted to other systems.
+
+## Running
+After compiling, run the server process on a windows machine with ```./MazeRacerServer.exe```. A help message will be displayed to guide you on what you can do. Run the client process on a windows machine and pass in the IP to the machine running the server process along with the port, which by default is set to ```9898```. An example run of the client will be: ```./MazeRacerClient.exe 10.10.10.10 9898```. After at least 2 successful client connections are made to the server, both clients will be matched and each be sent a text based visualization of the maze. Each client will be represented with the character 'o' and the goal is to reach the bottom right cell of the maze first. What this should look like:
+
+<img width="1659" height="393" alt="image" src="https://github.com/user-attachments/assets/cefc123b-fb7d-4e45-adfc-208d3e82e2bb" />
+
+## Extra
+Any arbitrary client program on an arbitrary machine can interact with the server and vice versa if they both abide by the RFC document for the game for their respective roles.
+
