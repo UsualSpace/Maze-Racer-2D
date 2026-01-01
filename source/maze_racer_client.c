@@ -1,13 +1,12 @@
-// Filename: maze_racer_client.c
+// Filename: maze_racer_test_client.c
 // Programmer(s): Abdurrahman Alyajouri
-// Date: 5/30/2025
-// Purpose: The purpose of this file is create the main window and game logic of this application.
+// Date: 5/27/2025
+// Purpose: To confirm messages are being properly sent back and forth.
 
-#include <glad/glad.h>
-#include <GLFW/glfw3.h>
 #include <stdio.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <conio.h>
 
 #include "networking_utils.h"
 #include "maze.h"
@@ -19,22 +18,34 @@
 # define EXIT_FAILURE 1
 #endif //EXIT_FAILURE
 
+#define PLAYER_CHAR 'o'
+
 static int p1_row = 0;
 static int p1_column = 0; 
+static int last_p1_row = 0;
+static int last_p1_column = 0;
+
 static int p2_row = 0;
 static int p2_column = 0;
+static int last_p2_row = 0;
+static int last_p2_column = 0;
 
-static int WINDOW_WIDTH = 640;
-static int WINDOW_HEIGHT = 480;
-const char* WINDOW_TITLE = "INSERT TITLE HERE";
+static struct timeval DONT_BLOCK = {
+    .tv_sec = 0,
+    .tv_usec = 0
+};
 
-// prototypes.
-void error_callback(int, const char*);
-static void key_callback(GLFWwindow*, int, int, int, int);
-static void framebuffer_callback(GLFWwindow*, int, int);
+void process_input(void);
+int changed_position(int is_p1);
+void draw_player(int old_row, int old_column, int row, int column, int maze_start_row, int maze_start_column, int is_p1);
+
+//assist in console rendering.
+COORD get_cursor_position();
+void move_cursor(int x, int y);
+
 
 int main(int argc, char* argv[]) {
-    
+
     //initialize winsock.
     WSADATA wsa_data;
     int wsa_startup_result = WSAStartup(MAKEWORD(2, 2), &wsa_data);
@@ -50,7 +61,7 @@ int main(int argc, char* argv[]) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    int getaddrinfo_result = getaddrinfo(argv[1], MRMP_DEFAULT_PORT, &hints, &result);
+    int getaddrinfo_result = getaddrinfo(argv[1], argv[2], &hints, &result);
     if(getaddrinfo_result != 0) {
         fprintf(stderr, "getaddrinfo failed: %d\n", getaddrinfo_result);
         WSACleanup();
@@ -81,100 +92,210 @@ int main(int argc, char* argv[]) {
     freeaddrinfo(result);
 
     if (connect_result == INVALID_SOCKET) {
-        fprintf(stderr, "unable to connect to MRMP server!\n");
+        fprintf(stderr, "unable to connect to server!\n");
         WSACleanup();
         return 1;
     }
 
-    int send_hello_result = send_hello_pkt(connect_socket, 0);
+    //say hello to the server.
+    int hello_result = send_hello_pkt(connect_socket, 0);
+    printf("sent hello packet.\n");
 
+    //wait for a hello acknowledgement from the server.
     char* msg = NULL;
-    int receive_hello_ack_result = receive_mrmp_msg(connect_socket, &msg, NULL);
-    // if(receive_hello_ack_result == ) {
+    receive_mrmp_msg(connect_socket, &msg, NULL);
+    if(PHEADER(msg)->opcode == MRMP_OPCODE_HELLO_ACK) {
+        printf("Received hello acknowledgement packet!\n");
+    }
+    free(msg);
+
+    //tell server you want to join the player queue to be put into a session.
+    send_join_pkt(connect_socket);
+    printf("sent join packet.\n");
+
+    //wait for receival of the maze structure for rendering purposes.
+    receive_mrmp_msg(connect_socket, &msg, NULL);
+
+    //TODO: figure out why printed maze origin in console starts printing here.
+    fflush(stdout);
+
+    if(PHEADER(msg)->opcode == MRMP_OPCODE_JOIN_RESP) {
+        printf("Received join response + maze packet!\n");
+    }
+
+    //convert the flattened maze array into a 2D array.
+    maze_t* maze = maze_network_to_host(PJOINRE(msg));
+    free(msg);
+
+    //clear screen, draw the maze and save the position of its top left corner on screen.
+    printf("\e[1;1H\e[2J");
+    fflush(stdout);
+    COORD maze_origin = get_cursor_position();
+    print_maze(maze);
+
+    //send ready packet.
+    send_ready_pkt(connect_socket);
+    fprintf(stderr, "sent ready packet.\n"); 
+
+    //wait for start packet.
+    int receive_start_result = receive_mrmp_msg(connect_socket, &msg, NULL);
+    // if(receive_start_result == ) {
 
     // }
+
+    if(PHEADER(msg)->opcode == MRMP_OPCODE_START) {
+       // printf("Received start notification! Beginning game loop.\n");
+    }
+
+    free(msg);
+
+    msg = NULL;
     
-    if((PHEADER msg)->opcode == MRMP_OPCODE_HELLO_ACK) {
-        printf("Received hello acknowledgement packet!\n");
+    int stop_game = FALSE;
+
+    //render players.
+    draw_player(last_p1_row, last_p1_column, p1_row, p1_column, maze_origin.Y, maze_origin.X, 1);
+    draw_player(last_p2_row, last_p2_column, p2_row, p2_column, maze_origin.Y, maze_origin.X, 0);
+
+    while(stop_game != TRUE) {
+        //read incoming messages first and foremost.
+        int game_msg_result = receive_mrmp_msg(connect_socket, &msg, &DONT_BLOCK);
+        if(game_msg_result != SUCCESS && game_msg_result != TIMEDOUT) {
+            //TODO: better cleanup logic?
+            stop_game = TRUE; //redunant but consistent.
+            send_leave_pkt(connect_socket);
+            break;
+        }
+
+        if(msg != NULL) {
+            switch(PHEADER(msg)->opcode) {
+                case MRMP_OPCODE_BAD_MOVE:
+                    p1_row = PMOVE(msg)->row;
+                    p1_column = PMOVE(msg)->column;
+                    break;
+                case MRMP_OPCODE_OPPONENT_MOVE:
+                    p2_row = PMOVE(msg)->row;
+                    p2_column = PMOVE(msg)->column;
+                    break;
+                case MRMP_OPCODE_RESULT:
+                    if(PRESULT(msg)->winner == 0) {
+                        printf("You lost.\n");
+                    } else {
+                        printf("You won!\n");
+                    }
+                    stop_game = TRUE;
+                    break;
+                case MRMP_OPCODE_TIMEOUT:
+                    printf("Timeout message received due to inactivity, aborting game session.\n");
+                    stop_game = TRUE;
+                    break;
+                case MRMP_OPCODE_ERROR:
+                    printf("Error message received, aborting game session.\n");
+                    send_leave_pkt(connect_socket);
+                    stop_game = TRUE;
+                    break;
+                default:
+                    printf("Unknown message received, aborting game session.\n");
+                    send_leave_pkt(connect_socket);
+                    stop_game = TRUE;
+                    break;
+            };
+        }
+
         free(msg);
-    } else {
+        msg = NULL;
 
-    }
+        if(stop_game == TRUE) break;
 
-    send_join_pkt(connect_socket);
+        process_input();
+        
+        //render players.
+        if(changed_position(0) == TRUE) {
+            draw_player(last_p2_row, last_p2_column, p2_row, p2_column, maze_origin.Y, maze_origin.X, 0);
+            last_p2_row = p2_row;
+            last_p2_column = p2_column;
+        }
 
-    receive_mrmp_msg(connect_socket, &msg, NULL);
-    if(((mrmp_pkt_join_resp_t*) msg)->header.opcode == MRMP_OPCODE_JOIN_RESP) {
-        printf("Received join response + maze packet!\n");
-        free(msg);
+        if(changed_position(1) == TRUE) {
+            draw_player(last_p1_row, last_p1_column, p1_row, p1_column, maze_origin.Y, maze_origin.X, 1);
+            send_move_pkt(connect_socket, p1_row, p1_column);
+            last_p1_row = p1_row;
+            last_p1_column = p1_column;
+        }   
     }
     
-    
-    //====================================================================================================
-    //ALL GLFW AND OPENGL INITIALIZATION STUFF.
+    shutdown(connect_socket, SD_SEND);
+    closesocket(connect_socket);
 
-    glfwSetErrorCallback(error_callback);
-
-    // initialize glfw, return on fail.
-    if(!glfwInit()) return EXIT_FAILURE;
-
-    // setup window and related hints/context.
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
-    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_TITLE, NULL, NULL);
-    if(!window) return EXIT_FAILURE;
-
-    glfwMakeContextCurrent(window);
-    glfwSetKeyCallback(window, key_callback);
-    glfwSetFramebufferSizeCallback(window, framebuffer_callback);
-
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        fprintf(stderr, "failed to initialize GLAD\n");
-        return EXIT_FAILURE;
-    }   
-
-    glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
-
-    //END OF GLFW AND OPENGL INITIALIZATION STUFF.
-    //====================================================================================================
-
-    // main loop
-    while(!glfwWindowShouldClose(window)) {
-
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f); // dark gray background
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-
-        //TODO: game logic updates and rendering here.
-
-
-        glfwSwapBuffers(window);
-        glfwPollEvents();
-    }
-
-    //cleanup.
-    glfwDestroyWindow(window);
-    glfwTerminate();
-
+    free_maze(maze);
+    printf("exiting test client\n");
     return EXIT_SUCCESS;
 }
 
-void error_callback(int error, const char* description) {
-    fprintf("GLFW ERROR: %s\n", description);
-}
+void process_input(void) {
+    int d;
+    if(kbhit()) d = _getch();
+    Sleep(10);
+    // int c;
+    // while(c = getchar() != '\n' && c != EOF); //clear stdin.
 
-static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
-        glfwSetWindowShouldClose(window, GLFW_TRUE);
+    switch(d) {
+        case 'w':
+            p1_row -= 1;
+            break;
+        case 'a':
+            p1_column -= 1;
+            break;
+        case 's':
+            p1_row += 1;
+            break;
+        case 'd': 
+            p1_column += 1;
+            break;
+        default:
+            break;
     }
 }
 
-static void framebuffer_callback(GLFWwindow* window, int width, int height) {
-    WINDOW_WIDTH = width;
-    WINDOW_HEIGHT = height;
-    glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+int changed_position(int is_p1) {
+    if(is_p1 == TRUE)
+        return (p1_row != last_p1_row || p1_column != last_p1_column);
+    else {
+        return (p2_row != last_p2_row || p2_column != last_p2_column);
+    }
+}
+
+void draw_player(int old_row, int old_column, int row, int column, int maze_start_row, int maze_start_column, int is_p1) {
+    fflush(stdout);
+    COORD current_pos = get_cursor_position();
+    fflush(stdout);
+    
+    //remove old position
+    move_cursor((old_column * 6 + 2) + maze_start_column, (old_row * 3 + 1) + maze_start_row);
+    
+    if ((is_p1 && (old_row != p2_row || old_column != p2_column)) || (!is_p1 && (old_row != p1_row || old_column != p1_column)))
+        putchar(' ');
+    
+    //draw in new position (6 + 2) horizontally due to format of printed maze.
+    move_cursor((column * 6 + 2) + maze_start_column, (row * 3 + 1) + maze_start_row);
+    putchar(PLAYER_CHAR);
+
+    //move back to original position for further message printing.
+    move_cursor(current_pos.X, current_pos.Y);
+}
+
+COORD get_cursor_position() {
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    COORD pos = {0, 0};
+
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)) {
+        pos = csbi.dwCursorPosition;
+    }
+
+    return pos;
+}
+
+void move_cursor(int x, int y) {
+    COORD pos = {x, y};
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
 }
