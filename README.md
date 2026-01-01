@@ -4,7 +4,7 @@ A small networked game serving as our final project for the CS494P Internetworki
 ## Setup
 This project can be compiled via CMake (see CMakeLists.txt). Make sure to set the appropriate CMake presets for your system (create and configure a CMakePresets.json). It was initially compiled and built using GCC as the compiler and Ninja as the build tool, though other tools will most likely work.
 
-This project uses windows api for sockets, multi-threading, and concurrency so it will only work on windows, but can pretty easily be adapted to other systems.
+This project's implementation of our MRMP uses windows api for sockets, multi-threading, and concurrency so it will only work on windows, but can pretty easily be adapted to other systems.
 
 ## Execution
 After compiling, run the server process on a windows machine with ```./MazeRacerServer.exe```. A help message will be displayed to guide you on what you can do. Run the client process on a windows machine and pass in the IP to the machine running the server process along with the port, which by default is set to ```9898```. An example run of the client could be: ```./MazeRacerClient.exe 10.10.10.10 9898```. After at least 2 successful client connections are made to the server, both clients will be matched and each be sent a text based visualization of the maze. Each client will be represented with the character 'o' and the goal is to reach the bottom right cell of the maze first. What this should look like:
