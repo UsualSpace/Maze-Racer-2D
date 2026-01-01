@@ -11,6 +11,12 @@ After compiling, run the server process on a windows machine with ```./MazeRacer
 
 <img width="1659" height="393" alt="image" src="https://github.com/user-attachments/assets/cefc123b-fb7d-4e45-adfc-208d3e82e2bb" />
 
+The keyboard controls are:
+* W - UP
+* A - LEFT
+* S - DOWN
+* D - RIGHT    
+
 ## Extra
 Any arbitrary client program on an arbitrary machine can interact with the server and vice versa if they both abide by the RFC document for the game for their respective roles.
 
